@@ -1,0 +1,37 @@
+{
+  "app-id": "io.github.fabio.SayWrite",
+  "runtime": "org.gnome.Platform",
+  "runtime-version": "46",
+  "sdk": "org.gnome.Sdk",
+  "command": "saywrite",
+  "finish-args": [
+    "--share=ipc",
+    "--socket=fallback-x11",
+    "--socket=wayland",
+    "--socket=pulseaudio",
+    "--device=dri",
+    "--talk-name=org.freedesktop.portal.Desktop"
+  ],
+  "modules": [
+    {
+      "name": "saywrite",
+      "buildsystem": "simple",
+      "build-commands": [
+        "install -Dm644 data/io.github.fabio.SayWrite.desktop /app/share/applications/io.github.fabio.SayWrite.desktop",
+        "install -Dm644 data/io.github.fabio.SayWrite.appdata.xml /app/share/metainfo/io.github.fabio.SayWrite.appdata.xml",
+        "install -Dm644 data/io.github.fabio.SayWrite.svg /app/share/icons/hicolor/scalable/apps/io.github.fabio.SayWrite.svg",
+        "mkdir -p /app/lib/python3.12/site-packages/saywrite",
+        "cp -r saywrite/*.py /app/lib/python3.12/site-packages/saywrite/",
+        "cp saywrite/theme.css /app/lib/python3.12/site-packages/saywrite/theme.css",
+        "printf '%s\n' '#!/usr/bin/env python3' 'from saywrite.main import main' 'raise SystemExit(main())' > /app/bin/saywrite",
+        "chmod +x /app/bin/saywrite"
+      ],
+      "sources": [
+        {
+          "type": "dir",
+          "path": ".."
+        }
+      ]
+    }
+  ]
+}

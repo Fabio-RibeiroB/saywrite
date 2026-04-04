@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=SayWrite
+Comment=Polished Linux dictation shell
+Exec=saywrite
+Icon=io.github.fabio.SayWrite
+Terminal=false
+Type=Application
+Categories=Utility;AudioVideo;
+StartupNotify=true
