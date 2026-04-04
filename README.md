@@ -59,10 +59,20 @@ SayWrite can be differentiated by taking the opposite stance: opinionated defaul
 
 ## Local Run
 
-The current scaffold includes a GTK4/libadwaita shell:
+The app shell is now being rebuilt as a Rust + GTK4/libadwaita application. The older
+Python code remains in-tree as backend and prototype reference material while the UI
+migration is in progress.
+
+For local Rust/GTK development on Ubuntu-like systems:
 
 ```bash
-python3 -m saywrite
+./scripts/bootstrap-rust-dev.sh
+```
+
+Then run:
+
+```bash
+cargo run
 ```
 
 For local development dependencies on Ubuntu-like systems:
@@ -89,6 +99,15 @@ To run the host-side insertion helper prototype:
 ./scripts/run-host-helper.sh
 ```
 
+On GNOME-based desktops without the GlobalShortcuts portal, install the prototype hands-free shortcut through GNOME custom shortcuts:
+
+```bash
+chmod +x ./scripts/run-global-dictation.sh ./scripts/install-gnome-shortcut.sh
+./scripts/install-gnome-shortcut.sh
+```
+
+That binds `Super+Alt+D` to `run-global-dictation.sh` for hands-free dictation.
+
 ## Repository Layout
 
 - `saywrite/` application package
@@ -98,13 +117,11 @@ To run the host-side insertion helper prototype:
 
 ## Current Status
 
-This is a scaffold for the product direction and desktop shell. It now includes:
+The project is now in an explicit migration phase:
 
-- a persisted first-run product shell
-- local versus cloud provider selection
-- deterministic cleanup preview behavior
-- backend diagnostics with automatic GPU-path selection
-- focused-field delivery through a host helper that tries accessibility insertion before clipboard fallback
-- a Flatpak manifest draft
+- the visible app shell is moving to Rust + GTK4/libadwaita
+- the redesign branch's onboarding-first UX is now reflected in the main branch structure
+- Python backend and host-helper code remain in-tree temporarily so the working dictation prototype is not lost during the migration
+- the Flatpak manifest has been redirected toward a Rust binary build instead of the old Python entrypoint
 
-The remaining major milestone is replacing the helper fallback path with deeper input-method integration so the Flatpak setup can graduate from prototype to product.
+The next major milestone is wiring the Rust shell back to the working backend path, then replacing the helper fallback insertion approach with deeper input-method integration.

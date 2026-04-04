@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/fabio/Documents/GitHub/saywrite-ui-redesign/**)",
+      "Bash(python3 -m py_compile saywrite/app.py)",
+      "Bash(python3 -c ':*)",
+      "Read(//home/fabio/Documents/GitHub/**)",
+      "Bash(git -C /home/fabio/Documents/GitHub/saywrite log --oneline --all)"
+    ]
+  }
+}

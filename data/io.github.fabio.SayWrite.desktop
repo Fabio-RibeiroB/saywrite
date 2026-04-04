@@ -5,5 +5,5 @@ Exec=saywrite
 Icon=io.github.fabio.SayWrite
 Terminal=false
 Type=Application
-Categories=Utility;AudioVideo;
+Categories=Utility;AudioVideo;Office;
 StartupNotify=true

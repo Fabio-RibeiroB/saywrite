@@ -1,13 +1,7 @@
-import time
 import unittest
 from unittest.mock import patch
 
-from saywrite_host.backends import (
-    AccessibilityBackend,
-    FallbackInsertionBackend,
-    KeyboardEventBackend,
-    find_focused_insertion_target,
-)
+from saywrite_host.backends import AccessibilityBackend, ClipboardPasteBackend, FallbackInsertionBackend, find_focused_insertion_target
 
 
 class FakeStateSet:
@@ -35,12 +29,14 @@ class FakeAccessible:
         editable: FakeEditableText | None = None,
         caret_offset: int = 0,
         children: list["FakeAccessible"] | None = None,
+        app_name: str = "",
     ) -> None:
         self._focused = focused
         self._editable = editable
         self._caret_offset = caret_offset
         self.children = children or []
         self.focus_grabbed = False
+        self._app_name = app_name
 
     def get_state_set(self) -> FakeStateSet:
         return FakeStateSet(self._focused)
@@ -60,6 +56,17 @@ class FakeAccessible:
     def grab_focus(self) -> bool:
         self.focus_grabbed = True
         return True
+
+    def get_application(self) -> "FakeApplication":
+        return FakeApplication(self._app_name)
+
+
+class FakeApplication:
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    def get_name(self) -> str:
+        return self._name
 
 
 class FakeBackend:
@@ -110,11 +117,7 @@ class HostBackendTests(unittest.TestCase):
         focused = FakeAccessible(focused=True, editable=editable, caret_offset=2)
         root = FakeAccessible(children=[focused])
         backend = AccessibilityBackend(desktops=[root], poll_interval=0.01)
-
-        time_limit = 20
-        while backend._remembered_target is None and time_limit > 0:
-            time.sleep(0.01)
-            time_limit -= 1
+        backend._remembered_target = find_focused_insertion_target([root])
 
         focused._focused = False
         try:
@@ -137,10 +140,36 @@ class HostBackendTests(unittest.TestCase):
 
         self.assertEqual(status, "clipboard: hello")
 
-    def test_keyboard_backend_sends_string_event(self) -> None:
-        backend = KeyboardEventBackend()
-        with patch("saywrite_host.backends.Atspi.generate_keyboard_event", return_value=True) as synth:
+    def test_clipboard_paste_backend_uses_terminal_paste_shortcut(self) -> None:
+        editable = FakeEditableText()
+        focused = FakeAccessible(focused=True, editable=editable, caret_offset=1, app_name="Terminal")
+        accessibility = AccessibilityBackend(desktops=[FakeAccessible(children=[focused])], poll_interval=0.01)
+        clipboard = type("Clipboard", (), {"set": lambda self, text: None})()
+        display = type("Display", (), {"get_clipboard": lambda self: clipboard})()
+        backend = ClipboardPasteBackend(accessibility)
+
+        try:
+            with patch("saywrite_host.backends.accessibility_bus_available", return_value=True), patch("saywrite_host.backends.Gtk.init"), patch(
+                "saywrite_host.backends.Gdk.Display.get_default", return_value=display
+            ), patch("saywrite_host.backends.Atspi.generate_keyboard_event", return_value=True) as synth:
+                status = backend.insert_text("hello")
+        finally:
+            accessibility.stop()
+
+        self.assertEqual(status, "Text pasted into the focused terminal.")
+        self.assertEqual(synth.call_args_list[0].args[0], 65507)
+        self.assertEqual(synth.call_args_list[1].args[0], 65505)
+
+    def test_clipboard_paste_backend_uses_normal_paste_shortcut(self) -> None:
+        accessibility = type("AccessibilityProbe", (), {"focused_application_name": lambda self: "Firefox"})()
+        clipboard = type("Clipboard", (), {"set": lambda self, text: None})()
+        display = type("Display", (), {"get_clipboard": lambda self: clipboard})()
+        backend = ClipboardPasteBackend(accessibility)
+
+        with patch("saywrite_host.backends.accessibility_bus_available", return_value=True), patch("saywrite_host.backends.Gtk.init"), patch(
+            "saywrite_host.backends.Gdk.Display.get_default", return_value=display
+        ), patch("saywrite_host.backends.Atspi.generate_keyboard_event", return_value=True) as synth:
             status = backend.insert_text("hello")
 
-        self.assertEqual(status, "Text typed into the currently focused app.")
-        synth.assert_called_once()
+        self.assertEqual(status, "Text pasted into the focused app.")
+        self.assertEqual(synth.call_args_list[0].args[0], 65507)

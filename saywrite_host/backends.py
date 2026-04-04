@@ -8,8 +8,9 @@ import gi
 
 gi.require_version("Atspi", "2.0")
 gi.require_version("Gdk", "4.0")
+gi.require_version("Gio", "2.0")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Atspi, Gdk, Gtk
+from gi.repository import Atspi, Gdk, Gio, Gtk
 
 
 @dataclass
@@ -49,6 +50,25 @@ def _editable_iface(accessible: object) -> object | None:
     if not callable(getter):
         return None
     return getter()
+
+
+def _application_name(accessible: object) -> str:
+    getter = getattr(accessible, "get_application", None)
+    if not callable(getter):
+        return ""
+    try:
+        app = getter()
+    except Exception:
+        return ""
+    if app is None:
+        return ""
+    name_getter = getattr(app, "get_name", None)
+    if callable(name_getter):
+        try:
+            return str(name_getter() or "")
+        except Exception:
+            return ""
+    return str(getattr(app, "name", "") or "")
 
 
 def _caret_offset(accessible: object) -> int:
@@ -108,8 +128,10 @@ class AccessibilityBackend:
         self.poll_interval = poll_interval
         self._remembered_target: InsertionTarget | None = None
         self._stop_event = threading.Event()
-        self._watcher = threading.Thread(target=self._watch_focus_loop, daemon=True)
-        self._watcher.start()
+        self._watcher: threading.Thread | None = None
+        if self.desktops is None:
+            self._watcher = threading.Thread(target=self._watch_focus_loop, daemon=True)
+            self._watcher.start()
 
     def _desktops(self) -> list[object]:
         return self.desktops if self.desktops is not None else list(Atspi.get_desktop_list())
@@ -126,7 +148,7 @@ class AccessibilityBackend:
 
     def stop(self) -> None:
         self._stop_event.set()
-        if self._watcher.is_alive():
+        if self._watcher is not None and self._watcher.is_alive():
             self._watcher.join(timeout=0.5)
 
     def _resolve_target(self) -> InsertionTarget | None:
@@ -153,6 +175,12 @@ class AccessibilityBackend:
             raise RuntimeError("Focused text field rejected accessibility text insertion")
         return "Text inserted into the last focused text field."
 
+    def focused_application_name(self) -> str:
+        target = self._resolve_target()
+        if target is None:
+            return ""
+        return _application_name(target.accessible)
+
 
 class ClipboardBackend:
     name = "clipboard"
@@ -167,22 +195,88 @@ class ClipboardBackend:
         return "Focused-field typing unavailable. Text copied to clipboard instead."
 
 
+class ClipboardPasteBackend:
+    name = "clipboard-paste"
+
+    def __init__(self, accessibility_backend: AccessibilityBackend | None = None) -> None:
+        self.accessibility_backend = accessibility_backend
+
+    def insert_text(self, text: str) -> str:
+        Gtk.init()
+        display = Gdk.Display.get_default()
+        if display is None:
+            raise RuntimeError("No display available for clipboard paste backend")
+        display.get_clipboard().set(text)
+        terminal_like = self._is_terminal_target()
+        self._paste_shortcut(terminal_like=terminal_like)
+        return (
+            "Text pasted into the focused terminal."
+            if terminal_like
+            else "Text pasted into the focused app."
+        )
+
+    def _is_terminal_target(self) -> bool:
+        if self.accessibility_backend is None:
+            return False
+        name = self.accessibility_backend.focused_application_name().lower()
+        return any(token in name for token in ("terminal", "ptyxis", "kgx", "console", "wezterm", "alacritty"))
+
+    def _paste_shortcut(self, terminal_like: bool) -> None:
+        if not accessibility_bus_available():
+            raise RuntimeError("Accessibility bus unavailable for paste synthesis")
+        modifiers = [Gdk.KEY_Control_L]
+        if terminal_like:
+            modifiers.append(Gdk.KEY_Shift_L)
+        for keyval in modifiers:
+            if not Atspi.generate_keyboard_event(keyval, None, Atspi.KeySynthType.LOCKMODIFIERS):
+                raise RuntimeError("Failed to lock paste modifiers")
+        try:
+            if not Atspi.generate_keyboard_event(Gdk.KEY_v, None, Atspi.KeySynthType.PRESSRELEASE):
+                raise RuntimeError("Paste key synthesis failed")
+        finally:
+            for keyval in reversed(modifiers):
+                Atspi.generate_keyboard_event(keyval, None, Atspi.KeySynthType.UNLOCKMODIFIERS)
+
+
 class KeyboardEventBackend:
     name = "keyboard"
 
     def insert_text(self, text: str) -> str:
+        if not accessibility_bus_available():
+            raise RuntimeError("Accessibility bus unavailable for keyboard synthesis")
         sent = bool(Atspi.generate_keyboard_event(0, text, Atspi.KeySynthType.STRING))
         if not sent:
             raise RuntimeError("Keyboard event synthesis failed")
         return "Text typed into the currently focused app."
 
 
+def accessibility_bus_available() -> bool:
+    try:
+        proxy = Gio.DBusProxy.new_for_bus_sync(
+            Gio.BusType.SESSION,
+            Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES,
+            None,
+            "org.a11y.Bus",
+            "/org/a11y/bus",
+            "org.freedesktop.DBus.Peer",
+            None,
+        )
+    except Exception:
+        return False
+    return proxy is not None
+
+
 class FallbackInsertionBackend:
     def __init__(self, backends: list[object] | None = None) -> None:
+        accessibility_backend = AccessibilityBackend()
         self.backends = (
             backends
             if backends is not None
-            else [AccessibilityBackend(), KeyboardEventBackend(), ClipboardBackend()]
+            else [
+                accessibility_backend,
+                ClipboardPasteBackend(accessibility_backend),
+                ClipboardBackend(),
+            ]
         )
 
     def insert_text(self, text: str) -> str:

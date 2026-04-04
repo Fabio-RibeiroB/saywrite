@@ -7,8 +7,6 @@ import socket
 import time
 
 from .backends import FallbackInsertionBackend
-
-
 SOCKET_NAME = "saywrite-host.sock"
 
 

@@ -24,15 +24,15 @@ Responsibilities:
 
 Suggested stack:
 
-- Python
+- Rust
 - GTK4
 - libadwaita
 
 Rationale:
 
-- fast iteration
-- native Linux visual language
-- good fit for Flatpak packaging
+- stronger long-term fit for a background-capable desktop utility
+- cleaner boundary between app shell and host/service components
+- native Linux visual language without carrying a prototype UI forever
 
 ### 2. Speech Service
 

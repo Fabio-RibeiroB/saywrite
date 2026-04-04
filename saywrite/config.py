@@ -20,7 +20,7 @@ class AppSettings:
     cloud_api_key: str = ""
     auto_copy_cleaned_text: bool = True
     auto_type_into_focused_app: bool = False
-    global_shortcut_label: str = "F8"
+    global_shortcut_label: str = "Super+Alt+D"
 
 
 def _settings_path() -> Path:
@@ -54,7 +54,7 @@ def load_settings() -> AppSettings:
         cloud_api_key=raw.get("cloud_api_key", ""),
         auto_copy_cleaned_text=bool(raw.get("auto_copy_cleaned_text", True)),
         auto_type_into_focused_app=bool(raw.get("auto_type_into_focused_app", False)),
-        global_shortcut_label=raw.get("global_shortcut_label", "F8"),
+        global_shortcut_label=raw.get("global_shortcut_label", "Super+Alt+D"),
     )
 
 

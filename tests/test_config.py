@@ -23,6 +23,7 @@ class ConfigTests(unittest.TestCase):
             cloud_api_key="secret",
             auto_copy_cleaned_text=False,
             auto_type_into_focused_app=True,
+            global_shortcut_label="Super+Alt+D",
         )
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
@@ -39,3 +40,4 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(stored["cloud_api_key"], "secret")
         self.assertFalse(stored["auto_copy_cleaned_text"])
         self.assertTrue(stored["auto_type_into_focused_app"])
+        self.assertEqual(stored["global_shortcut_label"], "Super+Alt+D")

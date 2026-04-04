@@ -16,15 +16,15 @@
     {
       "name": "saywrite",
       "buildsystem": "simple",
+      "build-options": {
+        "append-path": "/usr/lib/sdk/rust-stable/bin"
+      },
       "build-commands": [
+        "cargo --offline --locked build --release || cargo build --release",
+        "install -Dm755 target/release/saywrite /app/bin/saywrite",
         "install -Dm644 data/io.github.fabio.SayWrite.desktop /app/share/applications/io.github.fabio.SayWrite.desktop",
         "install -Dm644 data/io.github.fabio.SayWrite.appdata.xml /app/share/metainfo/io.github.fabio.SayWrite.appdata.xml",
-        "install -Dm644 data/io.github.fabio.SayWrite.svg /app/share/icons/hicolor/scalable/apps/io.github.fabio.SayWrite.svg",
-        "mkdir -p /app/lib/python3.12/site-packages/saywrite",
-        "cp -r saywrite/*.py /app/lib/python3.12/site-packages/saywrite/",
-        "cp saywrite/theme.css /app/lib/python3.12/site-packages/saywrite/theme.css",
-        "printf '%s\n' '#!/usr/bin/env python3' 'from saywrite.main import main' 'raise SystemExit(main())' > /app/bin/saywrite",
-        "chmod +x /app/bin/saywrite"
+        "install -Dm644 data/io.github.fabio.SayWrite.svg /app/share/icons/hicolor/scalable/apps/io.github.fabio.SayWrite.svg"
       ],
       "sources": [
         {

@@ -8,9 +8,9 @@
   <developer_name>Fabio</developer_name>
   <description>
     <p>
-      SayWrite is a Linux-first dictation product scaffold built around a polished GTK
-      application, a future host-side integration service, and a cleanup pipeline that
-      turns rough speech into usable text.
+      SayWrite is a Linux-first dictation product scaffold built around a modern Rust
+      and libadwaita application shell, a future host-side integration service, and a
+      cleanup pipeline that turns rough speech into usable text.
     </p>
   </description>
   <launchable type="desktop-id">io.github.fabio.SayWrite.desktop</launchable>
@@ -19,6 +19,6 @@
   </provides>
   <content_rating type="oars-1.1" />
   <releases>
-    <release version="0.1.0" date="2026-04-04" />
+    <release version="0.2.0" date="2026-04-04" />
   </releases>
 </component>

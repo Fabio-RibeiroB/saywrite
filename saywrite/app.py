@@ -218,7 +218,7 @@ class SayWriteWindow(Adw.ApplicationWindow):
         panel.append(heading)
 
         panel.append(self._status_row("Microphone", "Handled by Flatpak permission prompt on first capture."))
-        panel.append(self._status_row("Shortcut", "Use portal-based global shortcut binding as the default path."))
+        panel.append(self._status_row("Shortcut", f"Current helper hotkey: {self.settings.global_shortcut_label}. The host helper can record and type without bringing SayWrite forward."))
         panel.append(self._status_row("Text Input", "Target IBus for robust cross-app insertion, with fallbacks only where needed."))
         panel.append(self._status_row("Mode", f"Current provider mode: {self.settings.provider_mode.capitalize()}."))
 
@@ -606,7 +606,7 @@ class SayWriteWindow(Adw.ApplicationWindow):
         for title, subtitle in [
             ("Software Centre First", "The primary install story should be a Flatpak surfaced in GNOME Software and similar stores."),
             ("Flatpak Onboarding", "Every important setup step should be discoverable and understandable inside the app."),
-            ("Host Integration", "Focused-field typing now runs through the host helper first, with clipboard retained only as a fallback when insertion is unsupported."),
+            ("Host Integration", f"The host helper now owns a default {self.settings.global_shortcut_label} dictation hotkey so you can stay in the target app while recording and typing."),
         ]:
             panel.append(self._status_row(title, subtitle))
 
