@@ -1,104 +1,68 @@
 window {
   background:
     radial-gradient(circle at top right, rgba(236, 180, 130, 0.22), transparent 28%),
-    radial-gradient(circle at top left, rgba(76, 132, 255, 0.18), transparent 30%),
+    radial-gradient(circle at top left,  rgba(76, 132, 255, 0.18),  transparent 30%),
     linear-gradient(180deg, #f8f2e8 0%, #f2eee7 48%, #ece8df 100%);
   color: #1e1b18;
 }
 
+/* Header mode chip */
 .mode-chip {
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+/* State label */
+.state-label {
+  font-size: 0.88rem;
+  color: #7b5f40;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+/* Transcript bubble */
+.transcript-bubble {
+  border-radius: 18px;
+  padding: 16px 20px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(73, 57, 42, 0.10);
+  box-shadow: 0 4px 18px rgba(53, 37, 18, 0.07);
+}
+
+.transcript-text {
+  font-size: 1.08rem;
+  line-height: 1.5;
+  color: #1e1b18;
+}
+
+/* Record button */
+.record-button {
+  font-size: 1rem;
+  font-weight: 700;
+  padding: 14px 32px;
+  border-radius: 999px;
+  letter-spacing: 0.01em;
+}
+
+/* Status chip (prefs model list) */
+.status-chip {
   border-radius: 999px;
   padding: 4px 10px;
   background: rgba(255, 255, 255, 0.74);
   border: 1px solid rgba(73, 57, 42, 0.12);
   color: #543f2d;
+  font-size: 0.82rem;
   font-weight: 600;
 }
 
-.hero-card,
-.info-card,
-.transcript-card,
-.setup-card {
-  border-radius: 22px;
-  padding: 24px;
-  background: rgba(255, 255, 255, 0.76);
-  border: 1px solid rgba(73, 57, 42, 0.10);
-  box-shadow: 0 10px 30px rgba(53, 37, 18, 0.08);
-}
-
-.hero-kicker {
-  color: #7b5f40;
-  font-size: 0.84rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.hero-title {
-  font-size: 2.3rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-}
-
-.hero-copy {
-  font-size: 1.04rem;
-  line-height: 1.5;
-  color: #4c3e31;
-}
-
-.orb-button {
-  min-width: 190px;
-  min-height: 190px;
-  border-radius: 999px;
-  padding: 22px;
-  font-size: 1.08rem;
-  font-weight: 800;
-  background: linear-gradient(180deg, #c9732e 0%, #a65221 100%);
-  color: white;
-  box-shadow: 0 22px 40px rgba(157, 79, 31, 0.28);
-}
-
-.orb-caption {
-  color: #7b5f40;
-  font-weight: 600;
-}
-
-.status-chip {
-  border-radius: 999px;
-  padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.82);
-  border: 1px solid rgba(73, 57, 42, 0.12);
-  color: #543f2d;
-  font-weight: 700;
-}
-
-.card-title {
-  font-size: 1rem;
-  font-weight: 800;
-}
-
-.muted {
-  color: #6a5b4d;
-}
-
-.transcript-title {
-  font-size: 0.85rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: #7b5f40;
-}
-
-.transcript-text {
-  font-size: 1.06rem;
-  line-height: 1.55;
-}
-
+/* Onboarding */
 .onboarding-icon {
   color: #c8712e;
 }
 
 .onboarding-option-card {
-  border-radius: 16px;
-  padding: 16px;
+  border-radius: 14px;
+  padding: 14px 16px;
   background: rgba(255, 255, 255, 0.72);
   border: 1px solid rgba(73, 57, 42, 0.09);
 }
