@@ -19,7 +19,7 @@ class AppSettings:
     cloud_api_base: str = "https://api.openai.com/v1"
     cloud_api_key: str = ""
     auto_copy_cleaned_text: bool = True
-    auto_type_into_focused_app: bool = False
+    auto_type_into_focused_app: bool = True
     global_shortcut_label: str = "Super+Alt+D"
 
 
@@ -53,7 +53,7 @@ def load_settings() -> AppSettings:
         cloud_api_base=raw.get("cloud_api_base", "https://api.openai.com/v1"),
         cloud_api_key=raw.get("cloud_api_key", ""),
         auto_copy_cleaned_text=bool(raw.get("auto_copy_cleaned_text", True)),
-        auto_type_into_focused_app=bool(raw.get("auto_type_into_focused_app", False)),
+        auto_type_into_focused_app=bool(raw.get("auto_type_into_focused_app", True)),
         global_shortcut_label=raw.get("global_shortcut_label", "Super+Alt+D"),
     )
 

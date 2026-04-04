@@ -27,20 +27,27 @@ struct SendTextResponse {
     error: Option<String>,
 }
 
-pub fn transcribe_once(seconds: u32) -> Result<TranscriptResult> {
-    let output = run_python(&[
-        "-m",
-        "saywrite.bridge_cli",
-        "transcribe-once",
-        "--seconds",
-        &seconds.to_string(),
-    ])?;
-    let response: TranscribeResponse =
-        serde_json::from_slice(&output.stdout).context("invalid bridge response")?;
+pub fn start_live() -> Result<String> {
+    let output = run_python(&["-m", "saywrite.bridge_cli", "start-live"])?;
+    let response: SendTextResponse =
+        serde_json::from_slice(&output.stdout).context("invalid live-start response")?;
     if !response.ok {
         return Err(anyhow!(
             "{}",
-            response.error.unwrap_or_else(|| "transcription bridge failed".into())
+            response.error.unwrap_or_else(|| "failed to start dictation".into())
+        ));
+    }
+    Ok(response.status.unwrap_or_else(|| "Listening...".into()))
+}
+
+pub fn stop_live() -> Result<TranscriptResult> {
+    let output = run_python(&["-m", "saywrite.bridge_cli", "stop-live"])?;
+    let response: TranscribeResponse =
+        serde_json::from_slice(&output.stdout).context("invalid live-stop response")?;
+    if !response.ok {
+        return Err(anyhow!(
+            "{}",
+            response.error.unwrap_or_else(|| "failed to stop dictation".into())
         ));
     }
     Ok(TranscriptResult {

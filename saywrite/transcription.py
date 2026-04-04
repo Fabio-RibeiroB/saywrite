@@ -5,7 +5,7 @@ import tempfile
 import wave
 
 from .backend import TranscriptionRequest, WhisperCppBackend
-from .recorder import record_microphone_clip
+from .recorder import record_microphone_clip, stop_microphone_session
 
 
 def write_sine_wave(path: str, duration_seconds: float = 1.0, sample_rate: int = 16000) -> None:
@@ -47,6 +47,22 @@ def transcribe_recorded_microphone(model_path: str, whisper_cli_path: str | None
     backend.runtime.whisper_cli_path = whisper_cli_path
 
     audio_path = Path(record_microphone_clip(duration_seconds=duration_seconds))
+    try:
+        return backend.transcribe(TranscriptionRequest(str(audio_path), model_path))
+    finally:
+        audio_path.unlink(missing_ok=True)
+
+
+def transcribe_active_microphone_session(model_path: str, whisper_cli_path: str | None) -> str:
+    if not model_path.strip():
+        raise RuntimeError("No local model configured.")
+    if not whisper_cli_path:
+        raise RuntimeError("whisper.cpp CLI is not configured.")
+
+    backend = WhisperCppBackend()
+    backend.runtime.whisper_cli_path = whisper_cli_path
+
+    audio_path = Path(stop_microphone_session())
     try:
         return backend.transcribe(TranscriptionRequest(str(audio_path), model_path))
     finally:

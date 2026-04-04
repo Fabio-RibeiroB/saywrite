@@ -25,7 +25,7 @@ pub struct AppSettings {
     pub cloud_api_key: String,
     #[serde(default = "default_auto_copy")]
     pub auto_copy_cleaned_text: bool,
-    #[serde(default)]
+    #[serde(default = "default_auto_type")]
     pub auto_type_into_focused_app: bool,
     #[serde(default = "default_shortcut")]
     pub global_shortcut_label: String,
@@ -45,7 +45,7 @@ impl Default for AppSettings {
             cloud_api_base: default_cloud_api_base(),
             cloud_api_key: String::new(),
             auto_copy_cleaned_text: default_auto_copy(),
-            auto_type_into_focused_app: false,
+            auto_type_into_focused_app: default_auto_type(),
             global_shortcut_label: default_shortcut(),
         }
     }
@@ -126,6 +126,10 @@ fn default_cloud_api_base() -> String {
 }
 
 fn default_auto_copy() -> bool {
+    true
+}
+
+fn default_auto_type() -> bool {
     true
 }
 

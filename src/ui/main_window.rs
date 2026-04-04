@@ -176,7 +176,7 @@ fn build_transcript_panel(settings: Rc<RefCell<AppSettings>>) -> gtk::Box {
     title.add_css_class("transcript-title");
 
     let status = gtk::Label::builder()
-        .label("Ready. Record five seconds and SayWrite will transcribe through the existing local pipeline.")
+        .label("Ready. Start dictation, speak naturally, then stop when you are done.")
         .wrap(true)
         .xalign(0.0)
         .build();
@@ -211,20 +211,21 @@ fn build_transcript_panel(settings: Rc<RefCell<AppSettings>>) -> gtk::Box {
     cleaned_text.set_selectable(true);
 
     let action_row = gtk::Box::new(Orientation::Horizontal, 12);
-    let record_button = gtk::Button::with_label("Record 5s Dictation");
-    record_button.add_css_class("suggested-action");
-    record_button.add_css_class("pill");
+    let dictate_button = gtk::Button::with_label("Start Dictation");
+    dictate_button.add_css_class("suggested-action");
+    dictate_button.add_css_class("pill");
     let copy_button = gtk::Button::with_label("Copy Cleaned Text");
     copy_button.add_css_class("pill");
     copy_button.set_sensitive(false);
-    let type_button = gtk::Button::with_label("Type Into Focused App");
+    let type_button = gtk::Button::with_label("Retry Delivery");
     type_button.add_css_class("pill");
     type_button.set_sensitive(false);
-    action_row.append(&record_button);
+    action_row.append(&dictate_button);
     action_row.append(&copy_button);
     action_row.append(&type_button);
 
     let last_cleaned = Rc::new(RefCell::new(String::new()));
+    let is_listening = Rc::new(RefCell::new(false));
 
     {
         let cleaned_text = cleaned_text.clone();
@@ -249,31 +250,71 @@ fn build_transcript_panel(settings: Rc<RefCell<AppSettings>>) -> gtk::Box {
         let cleaned_text = cleaned_text.clone();
         let copy_button = copy_button.clone();
         let type_button = type_button.clone();
-        let record_button = record_button.clone();
+        let dictate_button = dictate_button.clone();
         let last_cleaned = last_cleaned.clone();
         let settings = settings.clone();
-        record_button.clone().connect_clicked(move |_| {
-            status.set_label("Recording for 5 seconds, then transcribing...");
-            record_button.set_sensitive(false);
-            copy_button.set_sensitive(false);
-            type_button.set_sensitive(false);
-
-            let (tx, rx) = mpsc::channel::<Result<TranscriptResult, String>>();
-            thread::spawn(move || {
-                let result = bridge::transcribe_once(5).map_err(|err| err.to_string());
-                let _ = tx.send(result);
-            });
-
+        let is_listening = is_listening.clone();
+        dictate_button.clone().connect_clicked(move |_| {
             let status = status.clone();
             let raw_text = raw_text.clone();
             let cleaned_text = cleaned_text.clone();
             let copy_button = copy_button.clone();
             let type_button = type_button.clone();
-            let record_button = record_button.clone();
+            let dictate_button = dictate_button.clone();
             let last_cleaned = last_cleaned.clone();
             let settings = settings.clone();
+            let is_listening = is_listening.clone();
+
+            if !*is_listening.borrow() {
+                status.set_label("Starting live dictation...");
+                dictate_button.set_sensitive(false);
+                copy_button.set_sensitive(false);
+                type_button.set_sensitive(false);
+
+                let (tx, rx) = mpsc::channel::<Result<String, String>>();
+                thread::spawn(move || {
+                    let result = bridge::start_live().map_err(|err| err.to_string());
+                    let _ = tx.send(result);
+                });
+
+                glib::timeout_add_local(Duration::from_millis(80), move || match rx.try_recv() {
+                    Ok(Ok(message)) => {
+                        *is_listening.borrow_mut() = true;
+                        status.set_label(&message);
+                        dictate_button.set_label("Stop Dictation");
+                        dictate_button.set_sensitive(true);
+                        raw_text.set_label("Listening...");
+                        cleaned_text.set_label("Waiting for final transcript...");
+                        glib::ControlFlow::Break
+                    }
+                    Ok(Err(error)) => {
+                        status.set_label(&format!("Could not start dictation: {error}"));
+                        dictate_button.set_sensitive(true);
+                        glib::ControlFlow::Break
+                    }
+                    Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        status.set_label("Dictation start worker disconnected unexpectedly.");
+                        dictate_button.set_sensitive(true);
+                        glib::ControlFlow::Break
+                    }
+                });
+                return;
+            }
+
+            status.set_label("Stopping dictation and transcribing...");
+            dictate_button.set_sensitive(false);
+
+            let (tx, rx) = mpsc::channel::<Result<TranscriptResult, String>>();
+            thread::spawn(move || {
+                let result = bridge::stop_live().map_err(|err| err.to_string());
+                let _ = tx.send(result);
+            });
+
             glib::timeout_add_local(Duration::from_millis(80), move || match rx.try_recv() {
                 Ok(Ok(result)) => {
+                    *is_listening.borrow_mut() = false;
+                    dictate_button.set_label("Start Dictation");
                     raw_text.set_label(if result.raw_text.is_empty() {
                         "No transcript produced."
                     } else {
@@ -288,26 +329,63 @@ fn build_transcript_panel(settings: Rc<RefCell<AppSettings>>) -> gtk::Box {
                     let has_cleaned = !result.cleaned_text.is_empty();
                     copy_button.set_sensitive(has_cleaned);
                     type_button.set_sensitive(has_cleaned);
-                    record_button.set_sensitive(true);
+                    dictate_button.set_sensitive(true);
                     if has_cleaned && settings.borrow().auto_copy_cleaned_text {
                         if let Some(display) = gdk::Display::default() {
                             display.clipboard().set_text(&result.cleaned_text);
                         }
-                        status.set_label("Dictation complete. Cleaned transcript copied to the clipboard.");
-                    } else {
+                    }
+                    if has_cleaned && settings.borrow().auto_type_into_focused_app {
+                        status.set_label("Dictation complete. Delivering text to the focused app...");
+                        type_button.set_sensitive(false);
+
+                        let (deliver_tx, deliver_rx) = mpsc::channel::<Result<String, String>>();
+                        let text = result.cleaned_text.clone();
+                        thread::spawn(move || {
+                            let result = bridge::send_text(&text, 0.0).map_err(|err| err.to_string());
+                            let _ = deliver_tx.send(result);
+                        });
+
+                        let status = status.clone();
+                        let type_button = type_button.clone();
+                        glib::timeout_add_local(Duration::from_millis(80), move || match deliver_rx.try_recv() {
+                            Ok(Ok(message)) => {
+                                status.set_label(&message);
+                                type_button.set_sensitive(true);
+                                glib::ControlFlow::Break
+                            }
+                            Ok(Err(error)) => {
+                                status.set_label(&format!("Automatic delivery failed: {error}"));
+                                type_button.set_sensitive(true);
+                                glib::ControlFlow::Break
+                            }
+                            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                            Err(mpsc::TryRecvError::Disconnected) => {
+                                status.set_label("Delivery worker disconnected unexpectedly.");
+                                type_button.set_sensitive(true);
+                                glib::ControlFlow::Break
+                            }
+                        });
+                    } else if has_cleaned {
                         status.set_label("Dictation complete.");
+                    } else {
+                        status.set_label("Dictation complete, but no cleaned transcript was produced.");
                     }
                     glib::ControlFlow::Break
                 }
                 Ok(Err(error)) => {
+                    *is_listening.borrow_mut() = false;
+                    dictate_button.set_label("Start Dictation");
                     status.set_label(&format!("Dictation failed: {error}"));
-                    record_button.set_sensitive(true);
+                    dictate_button.set_sensitive(true);
                     glib::ControlFlow::Break
                 }
                 Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
                 Err(mpsc::TryRecvError::Disconnected) => {
+                    *is_listening.borrow_mut() = false;
+                    dictate_button.set_label("Start Dictation");
                     status.set_label("Dictation worker disconnected unexpectedly.");
-                    record_button.set_sensitive(true);
+                    dictate_button.set_sensitive(true);
                     glib::ControlFlow::Break
                 }
             });
