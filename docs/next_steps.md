@@ -14,20 +14,36 @@ The next phase is not new architecture. It is release readiness.
 - Direct insertion works on the currently validated GNOME Wayland setup.
 - Clipboard and notification fallbacks exist for degraded environments.
 
+## Product Framing
+
+The product should be presented as two user-facing modes, even if the implementation still uses multiple processes under the hood:
+
+- `Clipboard Mode`:
+  - works with the Flatpak app alone
+  - records, transcribes, cleans, and copies text
+  - is the safe default when direct typing is not enabled
+- `Direct Typing Mode`:
+  - enables host integration outside the sandbox
+  - allows hotkey-driven dictation and text insertion into supported host apps
+  - should feel like a single guided setup step, not "install a separate program manually"
+
+The key UX goal is that users experience one product, not "app plus helper". If the host-side integration remains visible and manual, the product will feel meaningfully worse than apps that simply stay open and minimized.
+
 ## Release Priorities
 
 ## 1. Package the Host Companion Cleanly
 
-The Flatpak app is only half of the product. The host companion now needs a clean install story for normal users.
+The Flatpak app is only half of the full direct-typing story. The host companion now needs a clean install story for normal users, ideally behind a single "Enable Direct Typing" flow inside the app.
 
 - keep the Flatpak as the main UI distribution
 - package `saywrite-host` as a small native companion
 - keep `scripts/install-host.sh` as a fallback, not the primary story
 - make the app explain the host requirement in product language
+- frame this as enabling `Direct Typing Mode`, not as asking users to reason about a separate helper
 
 Success bar:
 
-- a user can install the app, install the host companion, and start dictating without reading source-oriented setup notes
+- a user can install the app, enable direct typing from inside the app, and start dictating without reading source-oriented setup notes
 
 ## 2. Harden the IBus Path
 
@@ -95,6 +111,7 @@ Success bar:
 
 The app should feel like a control panel for a hotkey-first product, not the center of the workflow.
 
+- make the first-run choice legible: `Clipboard Mode` now, `Direct Typing Mode` when enabled
 - improve first-run guidance around the shortcut and host companion
 - end onboarding with a real dictation test
 - improve diagnostics copy for direct typing vs fallback modes
