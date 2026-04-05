@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 const APP_DIR_NAME: &str = "saywrite";
 const SETTINGS_FILE_NAME: &str = "settings.json";
 const DEFAULT_CLOUD_API_BASE: &str = "https://api.openai.com/v1";
+const LEGACY_SHORTCUT: &str = "F8";
 const DEFAULT_SHORTCUT: &str = "Super+Alt+D";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -16,6 +17,50 @@ const DEFAULT_SHORTCUT: &str = "Super+Alt+D";
 pub enum ProviderMode {
     Local,
     Cloud,
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelSize {
+    Tiny,
+    #[default]
+    Base,
+    Small,
+}
+
+impl ModelSize {
+    pub fn filename(self) -> &'static str {
+        match self {
+            ModelSize::Tiny => "ggml-tiny.en.bin",
+            ModelSize::Base => "ggml-base.en.bin",
+            ModelSize::Small => "ggml-small.en.bin",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ModelSize::Tiny => "tiny.en (~75 MB)",
+            ModelSize::Base => "base.en (~142 MB)",
+            ModelSize::Small => "small.en (~466 MB)",
+        }
+    }
+
+    pub fn from_index(index: u32) -> Self {
+        match index {
+            0 => ModelSize::Tiny,
+            1 => ModelSize::Base,
+            2 => ModelSize::Small,
+            _ => ModelSize::Base,
+        }
+    }
+
+    pub fn to_index(self) -> u32 {
+        match self {
+            ModelSize::Tiny => 0,
+            ModelSize::Base => 1,
+            ModelSize::Small => 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +81,8 @@ pub struct AppSettings {
     pub auto_type_into_focused_app: bool,
     #[serde(default = "default_shortcut")]
     pub global_shortcut_label: String,
+    #[serde(default)]
+    pub model_size: ModelSize,
 }
 
 impl Default for AppSettings {
@@ -50,6 +97,7 @@ impl Default for AppSettings {
             auto_copy_cleaned_text: default_auto_copy(),
             auto_type_into_focused_app: default_auto_type(),
             global_shortcut_label: default_shortcut(),
+            model_size: ModelSize::default(),
         }
     }
 }
@@ -65,16 +113,26 @@ impl AppSettings {
 
         let raw = match fs::read_to_string(&path) {
             Ok(value) => value,
-            Err(_) => return Self::default(),
+            Err(err) => {
+                eprintln!("Failed to read settings from {}: {err}", path.display());
+                return Self::default();
+            }
         };
 
         let mut parsed: Self = match serde_json::from_str(&raw) {
             Ok(value) => value,
-            Err(_) => return Self::default(),
+            Err(err) => {
+                eprintln!("Failed to parse settings from {}: {err}", path.display());
+                return Self::default();
+            }
         };
 
         if parsed.local_model_path.is_none() && default_model.exists() {
             parsed.local_model_path = Some(default_model);
+        }
+        if parsed.global_shortcut_label.trim().eq_ignore_ascii_case(LEGACY_SHORTCUT) {
+            parsed.global_shortcut_label = default_shortcut();
+            let _ = parsed.save();
         }
 
         parsed
@@ -86,11 +144,15 @@ impl AppSettings {
             fs::create_dir_all(parent).with_context(|| {
                 format!("failed to create config directory {}", parent.display())
             })?;
+            set_private_permissions(parent)
+                .with_context(|| format!("failed to lock down {}", parent.display()))?;
         }
 
         let payload = serde_json::to_string_pretty(self)?;
         fs::write(&path, payload)
             .with_context(|| format!("failed to write {}", path.display()))?;
+        set_private_permissions(&path)
+            .with_context(|| format!("failed to lock down {}", path.display()))?;
         Ok(())
     }
 }
@@ -120,6 +182,17 @@ pub fn default_model_path() -> PathBuf {
     local_models_dir().join("ggml-base.en.bin")
 }
 
+pub fn preferred_model_path(settings: &AppSettings) -> PathBuf {
+    match &settings.local_model_path {
+        Some(path) => path.clone(),
+        None => default_model_path(),
+    }
+}
+
+pub fn model_path_for_size(size: ModelSize) -> PathBuf {
+    local_models_dir().join(size.filename())
+}
+
 fn default_provider_mode() -> ProviderMode {
     ProviderMode::Local
 }
@@ -138,4 +211,18 @@ fn default_auto_type() -> bool {
 
 fn default_shortcut() -> String {
     DEFAULT_SHORTCUT.into()
+}
+
+#[cfg(unix)]
+fn set_private_permissions(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mode = if path.is_dir() { 0o700 } else { 0o600 };
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_private_permissions(_path: &Path) -> anyhow::Result<()> {
+    Ok(())
 }

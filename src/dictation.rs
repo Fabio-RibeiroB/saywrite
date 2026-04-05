@@ -11,10 +11,25 @@ use anyhow::{anyhow, Context, Result};
 
 use crate::{
     cleanup::cleanup_transcript,
-    config::{default_model_path, AppSettings, ProviderMode},
+    config::{preferred_model_path, AppSettings, ProviderMode},
 };
 
 static ACTIVE_SESSION: OnceLock<Mutex<Option<RecordingSession>>> = OnceLock::new();
+pub const GST_CAPTURE_PIPELINE_ARGS: &[&str] = &[
+    "-q",
+    "-e",
+    "autoaudiosrc",
+    "!",
+    "audioconvert",
+    "!",
+    "audioresample",
+    "!",
+    "audio/x-raw,rate=16000,channels=1",
+    "!",
+    "wavenc",
+    "!",
+    "filesink",
+];
 
 #[derive(Debug, Clone)]
 pub struct TranscriptResult {
@@ -23,18 +38,75 @@ pub struct TranscriptResult {
 }
 
 #[derive(Debug)]
+pub enum DictationError {
+    WhisperCliNotFound,
+    NoLocalModel,
+    NoAudioCaptured,
+    MissingRuntimeDir,
+}
+
+impl std::fmt::Display for DictationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DictationError::WhisperCliNotFound => {
+                write!(
+                    f,
+                    "whisper.cpp CLI not found. Install the bundled runtime before starting dictation."
+                )
+            }
+            DictationError::NoLocalModel => {
+                write!(
+                    f,
+                    "No local model found. Finish setup in SayWrite before dictating."
+                )
+            }
+            DictationError::NoAudioCaptured => {
+                write!(f, "Microphone recording produced no audio.")
+            }
+            DictationError::MissingRuntimeDir => {
+                write!(
+                    f,
+                    "XDG_RUNTIME_DIR is not set. SayWrite needs a private runtime directory for recordings."
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for DictationError {}
+
+#[derive(Debug)]
 struct RecordingSession {
     child: Child,
     audio_path: PathBuf,
 }
 
+struct RecordingFileGuard {
+    path: PathBuf,
+}
+
+impl RecordingFileGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for RecordingFileGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
 pub fn start_live(settings: &AppSettings) -> Result<String> {
-    ensure_local_mode(settings)?;
-    let whisper_cli = discover_whisper_cli();
-    if !whisper_cli.exists() {
-        return Err(anyhow!(
-            "whisper.cpp CLI not found. Install the bundled runtime before starting dictation."
-        ));
+    if settings.provider_mode == ProviderMode::Local {
+        let whisper_cli = discover_whisper_cli();
+        if !whisper_cli.exists() {
+            return Err(anyhow::Error::new(DictationError::WhisperCliNotFound));
+        }
     }
 
     let mut guard = session_store().lock().expect("recording session mutex poisoned");
@@ -44,21 +116,7 @@ pub fn start_live(settings: &AppSettings) -> Result<String> {
 
     let audio_path = next_recording_path()?;
     let child = Command::new("gst-launch-1.0")
-        .args([
-            "-q",
-            "-e",
-            "autoaudiosrc",
-            "!",
-            "audioconvert",
-            "!",
-            "audioresample",
-            "!",
-            "audio/x-raw,rate=16000,channels=1",
-            "!",
-            "wavenc",
-            "!",
-            "filesink",
-        ])
+        .args(GST_CAPTURE_PIPELINE_ARGS)
         .arg(format!("location={}", audio_path.display()))
         .spawn()
         .context("failed to start microphone capture")?;
@@ -68,19 +126,12 @@ pub fn start_live(settings: &AppSettings) -> Result<String> {
 }
 
 pub fn stop_live(settings: &AppSettings) -> Result<TranscriptResult> {
-    ensure_local_mode(settings)?;
-    let model_path = preferred_model_path(settings);
-    if !model_path.exists() {
-        return Err(anyhow!(
-            "No local model found. Finish setup in SayWrite before dictating."
-        ));
-    }
-
     let mut session = session_store()
         .lock()
         .expect("recording session mutex poisoned")
         .take()
         .ok_or_else(|| anyhow!("No dictation session is running."))?;
+    let audio_file = RecordingFileGuard::new(session.audio_path.clone());
 
     interrupt_recording(&mut session.child)?;
     session
@@ -88,10 +139,18 @@ pub fn stop_live(settings: &AppSettings) -> Result<TranscriptResult> {
         .wait()
         .context("failed while stopping microphone capture")?;
 
-    validate_recording(&session.audio_path)?;
-    let raw_text = transcribe_file(&model_path, &discover_whisper_cli(), &session.audio_path)?;
+    validate_recording(audio_file.path())?;
+    let raw_text = match settings.provider_mode {
+        ProviderMode::Cloud => transcribe_cloud(settings, audio_file.path())?,
+        ProviderMode::Local => {
+            let model_path = preferred_model_path(settings);
+            if !model_path.exists() {
+                return Err(anyhow::Error::new(DictationError::NoLocalModel));
+            }
+            transcribe_file(&model_path, &discover_whisper_cli(), audio_file.path())?
+        }
+    };
     let cleaned_text = cleanup_transcript(&raw_text);
-    let _ = fs::remove_file(&session.audio_path);
 
     Ok(TranscriptResult {
         raw_text,
@@ -118,13 +177,6 @@ pub fn discover_whisper_cli() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("whisper-cli"))
 }
 
-pub fn preferred_model_path(settings: &AppSettings) -> PathBuf {
-    match &settings.local_model_path {
-        Some(path) => path.clone(),
-        None => default_model_path(),
-    }
-}
-
 pub fn active_session() -> bool {
     session_store()
         .lock()
@@ -136,22 +188,59 @@ fn session_store() -> &'static Mutex<Option<RecordingSession>> {
     ACTIVE_SESSION.get_or_init(|| Mutex::new(None))
 }
 
-fn ensure_local_mode(settings: &AppSettings) -> Result<()> {
-    if settings.provider_mode == ProviderMode::Cloud {
-        return Err(anyhow!(
-            "Cloud dictation is not wired into the Rust pipeline yet. Switch to Local."
-        ));
+fn transcribe_cloud(settings: &AppSettings, audio_path: &Path) -> Result<String> {
+    if settings.cloud_api_key.is_empty() {
+        return Err(anyhow!("Cloud API key is not set. Configure it in Settings."));
     }
-    Ok(())
+
+    let audio_data = fs::read(audio_path)
+        .with_context(|| format!("failed to read audio at {}", audio_path.display()))?;
+
+    let boundary = format!("----SayWrite{}", SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis());
+
+    let mut body = Vec::new();
+    // file field
+    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\nContent-Type: audio/wav\r\n\r\n").as_bytes());
+    body.extend_from_slice(&audio_data);
+    body.extend_from_slice(b"\r\n");
+    // model field
+    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-1\r\n").as_bytes());
+    // language field
+    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\nen\r\n").as_bytes());
+    // closing boundary
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+
+    let url = format!("{}/audio/transcriptions", settings.cloud_api_base.trim_end_matches('/'));
+
+    let response = ureq::post(&url)
+        .set("Authorization", &format!("Bearer {}", settings.cloud_api_key))
+        .set("Content-Type", &format!("multipart/form-data; boundary={boundary}"))
+        .send_bytes(&body)
+        .map_err(|e| anyhow!("Cloud transcription request failed: {e}"))?;
+
+    let response_text = response.into_string()
+        .context("failed to read cloud transcription response")?;
+    let json: serde_json::Value = serde_json::from_str(&response_text)
+        .context("failed to parse cloud transcription response")?;
+
+    json["text"]
+        .as_str()
+        .map(|s: &str| s.to_string())
+        .ok_or_else(|| anyhow!("Cloud response missing 'text' field"))
 }
 
 fn next_recording_path() -> Result<PathBuf> {
-    let base = env::var_os("XDG_RUNTIME_DIR")
+    let runtime_dir = env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(env::temp_dir)
-        .join("saywrite");
+        .ok_or_else(|| anyhow::Error::new(DictationError::MissingRuntimeDir))?;
+    let base = runtime_dir.join("saywrite");
     fs::create_dir_all(&base)
         .with_context(|| format!("failed to create recording directory {}", base.display()))?;
+    set_private_dir_permissions(&base)
+        .with_context(|| format!("failed to secure recording directory {}", base.display()))?;
 
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -176,8 +265,22 @@ fn validate_recording(audio_path: &Path) -> Result<()> {
     let metadata = fs::metadata(audio_path)
         .with_context(|| format!("missing recording at {}", audio_path.display()))?;
     if metadata.len() == 0 {
-        return Err(anyhow!("Microphone recording produced no audio."));
+        return Err(anyhow::Error::new(DictationError::NoAudioCaptured));
     }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_private_dir_permissions(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+        .with_context(|| format!("failed to set permissions on {}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_private_dir_permissions(_path: &Path) -> Result<()> {
     Ok(())
 }
 

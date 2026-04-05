@@ -1,10 +1,10 @@
 use std::{
     env,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use crate::{
-    config::{default_model_path, AppSettings, ProviderMode},
+    config::{preferred_model_path, AppSettings, ProviderMode},
     dictation,
     host_integration,
 };
@@ -40,22 +40,14 @@ pub fn probe_runtime(settings: &AppSettings) -> RuntimeProbe {
         } else {
             "Clipboard fallback until host integration is running".into()
         },
-        dictation_label: if dictation::active_session() {
-            "Live dictation session active".into()
+        dictation_label: if host_integration::host_dbus_available() {
+            "Host daemon ready for hotkey dictation".into()
         } else {
-            "Ready for local dictation".into()
+            "Install host companion for global hotkey dictation".into()
         },
         provider_label,
     }
 }
-
-fn preferred_model_path(settings: &AppSettings) -> PathBuf {
-    if let Some(path) = &settings.local_model_path {
-        return path.clone();
-    }
-    default_model_path()
-}
-
 fn shorten_path(path: &Path) -> String {
     if let Some(home) = dirs::home_dir() {
         if let Ok(stripped) = path.strip_prefix(&home) {

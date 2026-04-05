@@ -6,8 +6,12 @@ use gtk::{glib, Align, Orientation};
 
 use crate::{
     config::{AppSettings, ProviderMode},
+    dictation::GST_CAPTURE_PIPELINE_ARGS,
     model_installer,
+    ui::async_poll,
 };
+
+const MIC_TEST_MIN_BYTES: u64 = 100;
 
 pub fn present<F>(app: &adw::Application, settings: Rc<RefCell<AppSettings>>, on_complete: F)
 where
@@ -126,28 +130,35 @@ fn mic_page(carousel: adw::Carousel) -> gtk::Box {
             let status_label = status_label.clone();
             let test_btn = btn.clone();
             let continue_btn = continue_btn.clone();
+            let status_label_on_disconnect = status_label.clone();
+            let test_btn_on_disconnect = test_btn.clone();
 
-            glib::timeout_add_local(Duration::from_millis(100), move || match rx.try_recv() {
-                Ok(Ok(true)) => {
-                    status_label.set_label("Microphone is working!");
-                    status_label.add_css_class("success");
-                    test_btn.set_visible(false);
-                    continue_btn.set_visible(true);
+            async_poll::poll_receiver(
+                rx,
+                Duration::from_millis(100),
+                move |result| {
+                    match result {
+                        Ok(true) => {
+                            status_label.set_label("Microphone is working!");
+                            status_label.add_css_class("success");
+                            test_btn.set_visible(false);
+                            continue_btn.set_visible(true);
+                        }
+                        Ok(false) | Err(_) => {
+                            status_label
+                                .set_label("Could not detect audio. Check your mic and try again.");
+                            test_btn.set_sensitive(true);
+                            test_btn.set_label("Try Again");
+                        }
+                    }
                     glib::ControlFlow::Break
-                }
-                Ok(Ok(false)) | Ok(Err(_)) => {
-                    status_label.set_label("Could not detect audio. Check your mic and try again.");
-                    test_btn.set_sensitive(true);
-                    test_btn.set_label("Try Again");
+                },
+                move || {
+                    status_label_on_disconnect.set_label("Mic test failed unexpectedly.");
+                    test_btn_on_disconnect.set_sensitive(true);
                     glib::ControlFlow::Break
-                }
-                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    status_label.set_label("Mic test failed unexpectedly.");
-                    test_btn.set_sensitive(true);
-                    glib::ControlFlow::Break
-                }
-            });
+                },
+            );
         });
     }
 
@@ -183,7 +194,7 @@ fn shortcut_page(carousel: adw::Carousel, settings: Rc<RefCell<AppSettings>>) ->
     title.add_css_class("title-2");
 
     let body = gtk::Label::builder()
-        .label("Press one shortcut to start dictating. Press it again to stop. Your words appear wherever you're typing.")
+        .label("Press one shortcut to start dictating. Press it again to stop. The host companion handles capture and types your cleaned text back into the field you were using.")
         .wrap(true)
         .justify(gtk::Justification::Center)
         .build();
@@ -343,48 +354,54 @@ where
             let finish_btn = btn.clone();
             let on_complete = on_complete.clone();
             let settings_for_save = settings_click.clone();
+            let progress_label_on_disconnect = progress_label.clone();
+            let progress_bar_on_disconnect = progress_bar.clone();
+            let finish_btn_on_disconnect = finish_btn.clone();
 
-            glib::timeout_add_local(Duration::from_millis(100), move || match rx.try_recv() {
-                Ok(Ok(DownloadMsg::Progress { pct, label })) => {
-                    progress_label.set_label(&label);
-                    if let Some(fraction) = pct {
-                        progress_bar.set_fraction(fraction);
-                    } else {
-                        progress_bar.pulse();
+            async_poll::poll_receiver(
+                rx,
+                Duration::from_millis(100),
+                move |result| {
+                    match result {
+                        Ok(DownloadMsg::Progress { pct, label }) => {
+                            progress_label.set_label(&label);
+                            if let Some(fraction) = pct {
+                                progress_bar.set_fraction(fraction);
+                            } else {
+                                progress_bar.pulse();
+                            }
+                            return glib::ControlFlow::Continue;
+                        }
+                        Ok(DownloadMsg::Done) => {
+                            progress_bar.set_fraction(1.0);
+                            progress_label.set_label("Model ready!");
+                            {
+                                let mut state = settings_for_save.borrow_mut();
+                                state.local_model_path =
+                                    Some(crate::config::default_model_path());
+                                let _ = state.save();
+                            }
+                            on_complete();
+                        }
+                        Err(err) => {
+                            progress_bar.set_visible(false);
+                            progress_label.set_label(&format!("Download failed: {err}"));
+                            finish_btn.set_sensitive(true);
+                            finish_btn.set_label("Try Again");
+                            model_installer::cleanup_partial();
+                        }
                     }
-                    glib::ControlFlow::Continue
-                }
-                Ok(Ok(DownloadMsg::Done)) => {
-                    progress_bar.set_fraction(1.0);
-                    progress_label.set_label("Model ready!");
-                    // Update settings with model path
-                    {
-                        let mut state = settings_for_save.borrow_mut();
-                        state.local_model_path =
-                            Some(crate::config::default_model_path());
-                        let _ = state.save();
-                    }
-                    on_complete();
                     glib::ControlFlow::Break
-                }
-                Ok(Err(err)) => {
-                    progress_bar.set_visible(false);
-                    progress_label.set_label(&format!("Download failed: {err}"));
-                    finish_btn.set_sensitive(true);
-                    finish_btn.set_label("Try Again");
+                },
+                move || {
+                    progress_bar_on_disconnect.set_visible(false);
+                    progress_label_on_disconnect.set_label("Download failed unexpectedly.");
+                    finish_btn_on_disconnect.set_sensitive(true);
+                    finish_btn_on_disconnect.set_label("Try Again");
                     model_installer::cleanup_partial();
                     glib::ControlFlow::Break
-                }
-                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    progress_bar.set_visible(false);
-                    progress_label.set_label("Download failed unexpectedly.");
-                    finish_btn.set_sensitive(true);
-                    finish_btn.set_label("Try Again");
-                    model_installer::cleanup_partial();
-                    glib::ControlFlow::Break
-                }
-            });
+                },
+            );
         });
     }
 
@@ -443,14 +460,9 @@ fn test_mic_access() -> Result<bool, String> {
 
     // Record 1.5 seconds of audio
     let status = Command::new("timeout")
-        .args(["2", "gst-launch-1.0", "-q", "-e",
-            "autoaudiosrc", "!",
-            "audioconvert", "!",
-            "audioresample", "!",
-            "audio/x-raw,rate=16000,channels=1", "!",
-            "wavenc", "!",
-            "filesink", &format!("location={}", test_file.display()),
-        ])
+        .args(["2", "gst-launch-1.0"])
+        .args(GST_CAPTURE_PIPELINE_ARGS)
+        .arg(format!("location={}", test_file.display()))
         .status()
         .map_err(|e| format!("failed to run mic test: {e}"))?;
 
@@ -458,7 +470,7 @@ fn test_mic_access() -> Result<bool, String> {
     // gst-launch returns non-zero on actual errors
     let file_ok = test_file.exists()
         && fs::metadata(&test_file)
-            .map(|m| m.len() > 100)
+            .map(|m| m.len() > MIC_TEST_MIN_BYTES)
             .unwrap_or(false);
 
     let _ = fs::remove_file(&test_file);

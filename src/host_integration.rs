@@ -3,6 +3,7 @@ use std::{
     io::{Read, Write},
     os::unix::net::UnixStream,
     path::PathBuf,
+    sync::OnceLock,
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -10,7 +11,16 @@ use serde::Deserialize;
 
 use crate::host_api;
 
+#[derive(Debug, Clone)]
+pub enum HostEvent {
+    StateChanged(String),
+    TextReady { cleaned: String, raw_text: String },
+    InsertionResult { ok: bool, message: String },
+}
+
 const SOCKET_NAME: &str = "saywrite-host.sock";
+static TOKIO_RUNTIME: OnceLock<std::result::Result<tokio::runtime::Runtime, String>> =
+    OnceLock::new();
 
 #[derive(Debug, Deserialize)]
 struct HostResponse {
@@ -31,6 +41,38 @@ pub fn send_text(text: &str, delay_seconds: f64) -> Result<String> {
     send_text_socket(text, delay_seconds)
 }
 
+/// Toggle host-side dictation. This is the primary path for app-driven
+/// dictation when the host companion is available.
+pub fn toggle_dictation() -> Result<String> {
+    tokio_handle()?.block_on(async {
+        let conn = zbus::Connection::session()
+            .await
+            .context("no D-Bus session bus")?;
+        let proxy = zbus::Proxy::new(
+            &conn,
+            host_api::BUS_NAME,
+            host_api::OBJECT_PATH,
+            host_api::INTERFACE_NAME,
+        )
+        .await
+        .context("failed to create D-Bus host proxy")?;
+
+        let reply = proxy
+            .call_method("ToggleDictation", &())
+            .await
+            .context("D-Bus toggle call failed")?
+            .body()
+            .context("unexpected D-Bus toggle reply format")?;
+
+        let (ok, message): (bool, String) = reply;
+        if ok {
+            Ok(message)
+        } else {
+            Err(anyhow!("{}", message))
+        }
+    })
+}
+
 /// Check whether the host daemon is reachable via D-Bus or socket.
 pub fn host_available() -> bool {
     host_dbus_available() || host_socket_present()
@@ -38,18 +80,18 @@ pub fn host_available() -> bool {
 
 /// Check if the legacy Unix socket exists.
 pub fn host_socket_present() -> bool {
-    socket_path().exists()
+    socket_path().is_some_and(|path| path.exists())
 }
 
 /// Check if the host D-Bus service is available on the session bus.
 pub fn host_dbus_available() -> bool {
     // Blocking probe: try to call GetStatus with a short timeout.
     // If the bus name isn't registered, this returns quickly.
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(rt) => rt,
+    let handle = match tokio_handle() {
+        Ok(handle) => handle,
         Err(_) => return false,
     };
-    rt.block_on(async {
+    handle.block_on(async {
         let conn = match zbus::Connection::session().await {
             Ok(c) => c,
             Err(_) => return false,
@@ -70,8 +112,7 @@ pub fn host_dbus_available() -> bool {
 }
 
 fn send_text_dbus(text: &str) -> Result<String> {
-    let rt = tokio::runtime::Runtime::new().context("failed to start tokio runtime")?;
-    rt.block_on(async {
+    tokio_handle()?.block_on(async {
         let conn = zbus::Connection::session()
             .await
             .context("no D-Bus session bus")?;
@@ -102,7 +143,9 @@ fn send_text_dbus(text: &str) -> Result<String> {
 }
 
 fn send_text_socket(text: &str, delay_seconds: f64) -> Result<String> {
-    let path = socket_path();
+    let path = socket_path().ok_or_else(|| {
+        anyhow!("Host integration is not running. No private runtime directory is available.")
+    })?;
     if !path.exists() {
         return Err(anyhow!(
             "Host integration is not running. Text was not delivered."
@@ -144,9 +187,91 @@ fn send_text_socket(text: &str, delay_seconds: f64) -> Result<String> {
     ))
 }
 
-fn socket_path() -> PathBuf {
+fn socket_path() -> Option<PathBuf> {
     env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join(SOCKET_NAME)
+        .map(|dir| dir.join(SOCKET_NAME))
+}
+
+/// Subscribe to D-Bus signals from the host daemon.
+/// Returns an mpsc receiver that delivers `HostEvent`s.
+/// The caller should poll this with `glib::timeout_add_local`.
+pub fn subscribe_host_signals() -> Option<std::sync::mpsc::Receiver<HostEvent>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    std::thread::spawn(move || {
+        let handle = match tokio_handle() {
+            Ok(handle) => handle,
+            Err(_) => return,
+        };
+        handle.block_on(async {
+            let conn = match zbus::Connection::session().await {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+            let proxy = match zbus::Proxy::new(
+                &conn,
+                host_api::BUS_NAME,
+                host_api::OBJECT_PATH,
+                host_api::INTERFACE_NAME,
+            )
+            .await
+            {
+                Ok(p) => p,
+                Err(_) => return,
+            };
+
+            use futures_util::StreamExt;
+            let mut signals = match proxy.receive_all_signals().await {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+
+            while let Some(signal) = signals.next().await {
+                let header = match signal.header() {
+                    Ok(h) => h,
+                    Err(_) => continue,
+                };
+                let member = header.member().ok().flatten().map(|m| m.as_str().to_string());
+                match member.as_deref() {
+                    Some("DictationStateChanged") => {
+                        if let Ok(state) = signal.body::<String>() {
+                            let _ = tx.send(HostEvent::StateChanged(state));
+                        }
+                    }
+                    Some("TextReady") => {
+                        if let Ok((cleaned, raw_text)) = signal.body::<(String, String)>() {
+                            let _ = tx.send(HostEvent::TextReady { cleaned, raw_text });
+                        }
+                    }
+                    Some("InsertionResult") => {
+                        if let Ok((ok, message)) = signal.body::<(bool, String)>() {
+                            let _ = tx.send(HostEvent::InsertionResult { ok, message });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        });
+    });
+
+    Some(rx)
+}
+
+fn tokio_runtime() -> Result<&'static tokio::runtime::Runtime> {
+    let runtime = TOKIO_RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|err| err.to_string())
+    });
+
+    match runtime {
+        Ok(rt) => Ok(rt),
+        Err(err) => Err(anyhow!("failed to start tokio runtime: {err}")),
+    }
+}
+
+fn tokio_handle() -> Result<&'static tokio::runtime::Handle> {
+    Ok(tokio_runtime()?.handle())
 }

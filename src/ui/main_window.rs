@@ -12,12 +12,188 @@ use gtk::{gdk, glib, Align, Orientation};
 
 use crate::{
     config::AppSettings,
-    dictation::{self, TranscriptResult},
-    host_integration,
+    host_integration::{self, HostEvent},
     model_installer,
     runtime,
+    ui::async_poll,
     ui::preferences,
 };
+
+const ASYNC_POLL_INTERVAL: Duration = Duration::from_millis(80);
+
+#[derive(Clone)]
+struct MainWindowUi {
+    spinner: gtk::Spinner,
+    spinner_row: gtk::Box,
+    state_label: gtk::Label,
+    setup_panel: gtk::Box,
+    setup_title: gtk::Label,
+    setup_detail: gtk::Label,
+    transcript_label: gtk::Label,
+    transcript_bubble: gtk::Box,
+    action_row: gtk::Box,
+    dictate_btn: gtk::Button,
+    copy_btn: gtk::Button,
+    type_btn: gtk::Button,
+    last_cleaned: Rc<RefCell<String>>,
+    is_listening: Rc<RefCell<bool>>,
+}
+
+impl MainWindowUi {
+    fn begin_toggle(&self, starting: bool) {
+        self.dictate_btn.set_sensitive(false);
+        self.spinner_row.set_visible(true);
+        self.spinner.start();
+        self.setup_panel.set_visible(false);
+        self.state_label.set_label(if starting {
+            "Starting…"
+        } else {
+            "Processing…"
+        });
+        self.transcript_bubble.set_visible(false);
+        self.action_row.set_visible(false);
+    }
+
+    fn set_setup_state(&self, state_label: &str, title: &str, detail: &str) {
+        self.state_label.set_label(state_label);
+        self.setup_title.set_label(title);
+        self.setup_detail.set_label(detail);
+        self.setup_panel.set_visible(true);
+        self.dictate_btn.set_sensitive(false);
+    }
+
+    fn apply_toggle_success(&self, starting: bool) {
+        self.spinner.stop();
+        self.spinner_row.set_visible(false);
+
+        if starting {
+            *self.is_listening.borrow_mut() = true;
+            self.state_label.set_label("Listening…");
+            self.dictate_btn.set_label("  Stop Dictation  ");
+            self.dictate_btn.remove_css_class("suggested-action");
+            self.dictate_btn.add_css_class("destructive-action");
+        } else {
+            *self.is_listening.borrow_mut() = false;
+            self.state_label.set_label("Transcript ready");
+            self.dictate_btn.remove_css_class("destructive-action");
+            self.dictate_btn.add_css_class("suggested-action");
+            self.dictate_btn.set_label("  Start Dictation  ");
+        }
+        self.dictate_btn.set_sensitive(true);
+    }
+
+    fn apply_toggle_error(&self, error: &str) {
+        *self.is_listening.borrow_mut() = false;
+        self.spinner.stop();
+        self.spinner_row.set_visible(false);
+        self.state_label.set_label(&friendly_error_message(error));
+        self.dictate_btn.remove_css_class("destructive-action");
+        self.dictate_btn.add_css_class("suggested-action");
+        self.dictate_btn.set_label("  Retry Dictation  ");
+        self.dictate_btn.set_sensitive(true);
+    }
+
+    fn apply_host_disconnect(&self) {
+        *self.is_listening.borrow_mut() = false;
+        self.spinner.stop();
+        self.spinner_row.set_visible(false);
+        self.state_label.set_label("The host companion disconnected.");
+        self.dictate_btn.remove_css_class("destructive-action");
+        self.dictate_btn.add_css_class("suggested-action");
+        self.dictate_btn.set_label("  Start Dictation  ");
+        self.dictate_btn.set_sensitive(true);
+    }
+
+    fn apply_host_state(&self, state: &str) {
+        match state {
+            "listening" => {
+                *self.is_listening.borrow_mut() = true;
+                self.spinner.stop();
+                self.spinner_row.set_visible(false);
+                self.state_label.set_label("Listening…");
+                self.dictate_btn.set_label("  Stop Dictating  ");
+                self.dictate_btn.remove_css_class("suggested-action");
+                self.dictate_btn.add_css_class("destructive-action");
+                self.dictate_btn.set_sensitive(true);
+            }
+            "processing" => {
+                self.spinner_row.set_visible(true);
+                self.spinner.start();
+                self.state_label
+                    .set_label("Processing your transcript…");
+                self.dictate_btn.set_sensitive(false);
+            }
+            "done" | "idle" => {
+                *self.is_listening.borrow_mut() = false;
+                self.spinner.stop();
+                self.spinner_row.set_visible(false);
+                self.dictate_btn.remove_css_class("destructive-action");
+                self.dictate_btn.add_css_class("suggested-action");
+                self.dictate_btn.set_label("  Start Dictation  ");
+                self.dictate_btn.set_sensitive(true);
+                self.state_label
+                    .set_label(if state == "done" { "Transcript ready" } else { "Ready" });
+            }
+            _ => {}
+        }
+    }
+
+    fn show_transcript(&self, cleaned: &str, raw_text: &str) {
+        let final_text = if cleaned.is_empty() { raw_text } else { cleaned };
+        let display = if final_text.is_empty() {
+            "Nothing captured."
+        } else {
+            final_text
+        };
+        self.transcript_label.set_label(display);
+        self.transcript_bubble.set_visible(true);
+        *self.last_cleaned.borrow_mut() = final_text.to_string();
+        let has_text = !final_text.is_empty();
+        self.copy_btn.set_sensitive(has_text);
+        self.type_btn.set_sensitive(has_text);
+        self.action_row.set_visible(has_text);
+    }
+
+    fn apply_insertion_result(&self, ok: bool, message: &str) {
+        if ok {
+            self.state_label.set_label(message);
+        } else {
+            self.state_label
+                .set_label(&format!("Insertion failed: {message}"));
+        }
+    }
+
+    fn start_send_to_app(&self) {
+        self.type_btn.set_sensitive(false);
+        self.state_label.set_label("Sending to focused app…");
+    }
+
+    fn finish_send_to_app(&self, result: Result<String, String>, text: &str) {
+        match result {
+            Ok(message) => self.state_label.set_label(&message),
+            Err(err) => {
+                if let Some(display) = gdk::Display::default() {
+                    display.clipboard().set_text(text);
+                    self.state_label.set_label(&format!(
+                        "{} Copied the text to your clipboard instead.",
+                        friendly_error_message(&err)
+                    ));
+                } else {
+                    self.state_label.set_label(&friendly_error_message(&err));
+                }
+            }
+        }
+        self.type_btn.set_sensitive(true);
+    }
+
+    fn copy_last_cleaned_to_clipboard(&self) {
+        let text = self.last_cleaned.borrow().clone();
+        if let Some(display) = gdk::Display::default() {
+            display.clipboard().set_text(&text);
+            self.state_label.set_label("Copied to clipboard");
+        }
+    }
+}
 
 pub fn present(app: &adw::Application, settings: Rc<RefCell<AppSettings>>) {
     let window = adw::ApplicationWindow::builder()
@@ -25,8 +201,8 @@ pub fn present(app: &adw::Application, settings: Rc<RefCell<AppSettings>>) {
         .title("SayWrite")
         .default_width(640)
         .default_height(560)
-        .resizable(false)
         .build();
+    window.set_size_request(480, 520);
 
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&build_header(&window, settings.clone()));
@@ -45,6 +221,7 @@ fn build_header(
     mode_chip.add_css_class("flat");
     mode_chip.add_css_class("mode-chip");
     mode_chip.set_child(Some(&mode_chip_content(&settings.borrow())));
+    mode_chip.set_tooltip_text(Some("Open settings"));
     {
         let window = window.clone();
         let settings = settings.clone();
@@ -56,6 +233,7 @@ fn build_header(
         .icon_name("preferences-system-symbolic")
         .build();
     prefs.add_css_class("flat");
+    prefs.set_tooltip_text(Some("Open settings"));
     {
         let window = window.clone();
         let settings = settings.clone();
@@ -67,7 +245,7 @@ fn build_header(
 }
 
 fn build_body(
-    _window: &adw::ApplicationWindow,
+    window: &adw::ApplicationWindow,
     settings: Rc<RefCell<AppSettings>>,
 ) -> gtk::Widget {
     let outer = gtk::Box::new(Orientation::Vertical, 0);
@@ -93,6 +271,45 @@ fn build_body(
     state_label.add_css_class("state-label");
     state_label.set_margin_top(12);
 
+    let setup_panel = gtk::Box::new(Orientation::Vertical, 10);
+    setup_panel.add_css_class("setup-panel");
+    setup_panel.set_halign(Align::Center);
+    setup_panel.set_margin_top(18);
+    setup_panel.set_margin_bottom(8);
+    setup_panel.set_visible(false);
+
+    let setup_icon = gtk::Image::from_icon_name("dialog-information-symbolic");
+    setup_icon.set_pixel_size(24);
+    setup_icon.add_css_class("onboarding-icon");
+    setup_icon.set_halign(Align::Center);
+
+    let setup_title = gtk::Label::new(None);
+    setup_title.add_css_class("title-4");
+    setup_title.set_wrap(true);
+    setup_title.set_justify(gtk::Justification::Center);
+    setup_title.set_halign(Align::Center);
+
+    let setup_detail = gtk::Label::new(None);
+    setup_detail.add_css_class("caption");
+    setup_detail.set_wrap(true);
+    setup_detail.set_justify(gtk::Justification::Center);
+    setup_detail.set_halign(Align::Center);
+    setup_detail.set_max_width_chars(48);
+
+    let setup_action = gtk::Button::with_label("Open Settings");
+    setup_action.add_css_class("pill");
+    setup_action.set_halign(Align::Center);
+    {
+        let window = window.clone();
+        let settings = settings.clone();
+        setup_action.connect_clicked(move |_| preferences::present(&window, settings.clone()));
+    }
+
+    setup_panel.append(&setup_icon);
+    setup_panel.append(&setup_title);
+    setup_panel.append(&setup_detail);
+    setup_panel.append(&setup_action);
+
     // Transcript bubble
     let transcript_label = gtk::Label::new(None);
     transcript_label.set_wrap(true);
@@ -107,10 +324,10 @@ fn build_body(
     transcript_bubble.set_margin_top(32);
 
     // Action row (copy + type, shown after result)
-    let copy_btn = gtk::Button::with_label("Copy");
+    let copy_btn = gtk::Button::with_label("Copy to Clipboard");
     copy_btn.add_css_class("pill");
 
-    let type_btn = gtk::Button::with_label("Type into app");
+    let type_btn = gtk::Button::with_label("Type into App");
     type_btn.add_css_class("pill");
     type_btn.set_visible(host_integration::host_available());
 
@@ -122,255 +339,135 @@ fn build_body(
     action_row.set_visible(false);
 
     // Dictate button
-    let dictate_btn = gtk::Button::with_label("  Start Dictating  ");
+    let dictate_btn = gtk::Button::with_label("  Start Dictation  ");
     dictate_btn.add_css_class("suggested-action");
     dictate_btn.add_css_class("pill");
     dictate_btn.add_css_class("record-button");
     dictate_btn.set_halign(Align::Center);
     dictate_btn.set_margin_top(36);
 
+    let ui = MainWindowUi {
+        spinner: spinner.clone(),
+        spinner_row: spinner_row.clone(),
+        state_label: state_label.clone(),
+        setup_panel: setup_panel.clone(),
+        setup_title: setup_title.clone(),
+        setup_detail: setup_detail.clone(),
+        transcript_label: transcript_label.clone(),
+        transcript_bubble: transcript_bubble.clone(),
+        action_row: action_row.clone(),
+        dictate_btn: dictate_btn.clone(),
+        copy_btn: copy_btn.clone(),
+        type_btn: type_btn.clone(),
+        last_cleaned: Rc::new(RefCell::new(String::new())),
+        is_listening: Rc::new(RefCell::new(false)),
+    };
+
     // Check readiness and gate the button
     {
+        let host_ready = host_integration::host_dbus_available();
         let probe = runtime::probe_runtime(&settings.borrow());
-        if settings.borrow().provider_mode == crate::config::ProviderMode::Local {
+        if !host_ready {
+            ui.set_setup_state(
+                "Complete setup to start dictation",
+                "Host companion required",
+                "Install and run the host companion to use global shortcut dictation and type text into other apps.",
+            );
+        } else if settings.borrow().provider_mode == crate::config::ProviderMode::Local {
             if !probe.whisper_cli_found {
-                state_label.set_label("whisper.cpp not found — check Diagnostics in Settings");
-                dictate_btn.set_sensitive(false);
+                ui.set_setup_state(
+                    "Local dictation is not ready yet",
+                    "whisper.cpp not found",
+                    "Open Settings to check diagnostics and finish the local runtime setup.",
+                );
             } else if !probe.local_model_present && !model_installer::model_exists() {
-                state_label.set_label("No model downloaded — open Settings to install one");
-                dictate_btn.set_sensitive(false);
+                ui.set_setup_state(
+                    "Local dictation is not ready yet",
+                    "Download a local model",
+                    "Open Settings and install a whisper.cpp model before starting local dictation.",
+                );
             }
         }
     }
 
     outer.append(&spinner_row);
     outer.append(&state_label);
+    outer.append(&setup_panel);
     outer.append(&transcript_bubble);
     outer.append(&action_row);
     outer.append(&dictate_btn);
 
-    let last_cleaned: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
-    let is_listening: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
-
     // --- Dictate button ---
     {
-        let spinner = spinner.clone();
-        let spinner_row = spinner_row.clone();
-        let state_label = state_label.clone();
-        let transcript_bubble = transcript_bubble.clone();
-        let transcript_label = transcript_label.clone();
-        let action_row = action_row.clone();
-        let copy_btn = copy_btn.clone();
-        let type_btn = type_btn.clone();
-        let dictate_btn = dictate_btn.clone();
-        let last_cleaned = last_cleaned.clone();
-        let is_listening = is_listening.clone();
-        let settings = settings.clone();
+        let ui = ui.clone();
+        dictate_btn.clone().connect_clicked(move |_| {
+            let starting = !*ui.is_listening.borrow();
+            ui.begin_toggle(starting);
 
-        dictate_btn.clone().connect_clicked(move |btn| {
-            if !*is_listening.borrow() {
-                // START
-                btn.set_sensitive(false);
-                spinner_row.set_visible(true);
-                spinner.start();
-                state_label.set_label("Starting\u{2026}");
-                transcript_bubble.set_visible(false);
-                action_row.set_visible(false);
+            let (tx, rx) = mpsc::channel::<Result<String, String>>();
+            thread::spawn(move || {
+                let result = host_integration::toggle_dictation().map_err(|e| e.to_string());
+                let _ = tx.send(result);
+            });
 
-                let (tx, rx) = mpsc::channel::<Result<String, String>>();
-                let settings_snapshot = settings.borrow().clone();
-                thread::spawn(move || {
-                    let result = dictation::start_live(&settings_snapshot).map_err(|e| e.to_string());
-                    let _ = tx.send(result);
-                });
-
-                let spinner = spinner.clone();
-                let spinner_row = spinner_row.clone();
-                let state_label = state_label.clone();
-                let dictate_btn = dictate_btn.clone();
-                let is_listening = is_listening.clone();
-
-                glib::timeout_add_local(Duration::from_millis(80), move || match rx.try_recv() {
-                    Ok(Ok(_)) => {
-                        *is_listening.borrow_mut() = true;
-                        spinner.stop();
-                        spinner_row.set_visible(false);
-                        state_label.set_label("Listening\u{2026}");
-                        dictate_btn.set_label("  Stop Dictating  ");
-                        dictate_btn.remove_css_class("suggested-action");
-                        dictate_btn.add_css_class("destructive-action");
-                        dictate_btn.set_sensitive(true);
-                        glib::ControlFlow::Break
+            let ui_for_value = ui.clone();
+            let ui_for_disconnect = ui.clone();
+            async_poll::poll_receiver(
+                rx,
+                ASYNC_POLL_INTERVAL,
+                move |result| {
+                    match result {
+                        Ok(_) => ui_for_value.apply_toggle_success(starting),
+                        Err(err) => ui_for_value.apply_toggle_error(&err),
                     }
-                    Ok(Err(err)) => {
-                        spinner.stop();
-                        spinner_row.set_visible(false);
-                        state_label.set_label(&format!("Error: {}", err));
-                        dictate_btn.set_label("  Try Again  ");
-                        dictate_btn.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                    Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        spinner.stop();
-                        spinner_row.set_visible(false);
-                        state_label.set_label("Worker disconnected.");
-                        dictate_btn.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                });
-            } else {
-                // STOP
-                btn.set_sensitive(false);
-                spinner_row.set_visible(true);
-                spinner.start();
-                state_label.set_label("Processing\u{2026}");
-
-                let (tx, rx) = mpsc::channel::<Result<TranscriptResult, String>>();
-                let settings_snapshot = settings.borrow().clone();
-                thread::spawn(move || {
-                    let result = dictation::stop_live(&settings_snapshot).map_err(|e| e.to_string());
-                    let _ = tx.send(result);
-                });
-
-                let spinner = spinner.clone();
-                let spinner_row = spinner_row.clone();
-                let state_label = state_label.clone();
-                let transcript_label = transcript_label.clone();
-                let transcript_bubble = transcript_bubble.clone();
-                let action_row = action_row.clone();
-                let copy_btn = copy_btn.clone();
-                let type_btn = type_btn.clone();
-                let dictate_btn = dictate_btn.clone();
-                let last_cleaned = last_cleaned.clone();
-                let is_listening = is_listening.clone();
-                let settings = settings.clone();
-
-                glib::timeout_add_local(Duration::from_millis(80), move || match rx.try_recv() {
-                    Ok(Ok(result)) => {
-                        *is_listening.borrow_mut() = false;
-                        spinner.stop();
-                        spinner_row.set_visible(false);
-
-                        let cleaned = if result.cleaned_text.is_empty() {
-                            result.raw_text.clone()
-                        } else {
-                            result.cleaned_text.clone()
-                        };
-                        let display = if cleaned.is_empty() {
-                            "Nothing captured.".to_string()
-                        } else {
-                            cleaned.clone()
-                        };
-                        transcript_label.set_label(&display);
-                        transcript_bubble.set_visible(true);
-                        *last_cleaned.borrow_mut() = cleaned.clone();
-
-                        let has_result = !cleaned.is_empty();
-                        copy_btn.set_sensitive(has_result);
-                        type_btn.set_sensitive(has_result);
-                        action_row.set_visible(has_result);
-
-                        dictate_btn.remove_css_class("destructive-action");
-                        dictate_btn.add_css_class("suggested-action");
-                        dictate_btn.set_label("  Dictate Again  ");
-                        dictate_btn.set_sensitive(true);
-
-                        if has_result && settings.borrow().auto_copy_cleaned_text {
-                            if let Some(disp) = gdk::Display::default() {
-                                disp.clipboard().set_text(&cleaned);
-                            }
-                            state_label.set_label("Done \u{2014} copied to clipboard");
-                        } else if has_result && settings.borrow().auto_type_into_focused_app {
-                            state_label.set_label("Delivering to focused app\u{2026}");
-                            type_btn.set_sensitive(false);
-                            let (dtx, drx) = mpsc::channel::<Result<String, String>>();
-                            let text = cleaned.clone();
-                            thread::spawn(move || {
-                                let r = host_integration::send_text(&text, 0.0).map_err(|e| e.to_string());
-                                let _ = dtx.send(r);
-                            });
-                            let state_label = state_label.clone();
-                            let type_btn = type_btn.clone();
-                            let cleaned = cleaned.clone();
-                            glib::timeout_add_local(Duration::from_millis(80), move || {
-                                match drx.try_recv() {
-                                    Ok(Ok(msg)) => {
-                                        state_label.set_label(&msg);
-                                        type_btn.set_sensitive(true);
-                                        glib::ControlFlow::Break
-                                    }
-                                    Ok(Err(err)) => {
-                                        if let Some(disp) = gdk::Display::default() {
-                                            disp.clipboard().set_text(&cleaned);
-                                            state_label.set_label(&format!("{err} Copied to clipboard instead."));
-                                        } else {
-                                            state_label.set_label(&format!("Delivery failed: {}", err));
-                                        }
-                                        type_btn.set_sensitive(true);
-                                        glib::ControlFlow::Break
-                                    }
-                                    Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                                    Err(mpsc::TryRecvError::Disconnected) => {
-                                        type_btn.set_sensitive(true);
-                                        glib::ControlFlow::Break
-                                    }
-                                }
-                            });
-                        } else {
-                            state_label.set_label("Done");
-                        }
-
-                        glib::ControlFlow::Break
-                    }
-                    Ok(Err(err)) => {
-                        *is_listening.borrow_mut() = false;
-                        spinner.stop();
-                        spinner_row.set_visible(false);
-                        state_label.set_label(&format!("Error: {}", err));
-                        dictate_btn.remove_css_class("destructive-action");
-                        dictate_btn.add_css_class("suggested-action");
-                        dictate_btn.set_label("  Try Again  ");
-                        dictate_btn.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                    Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        *is_listening.borrow_mut() = false;
-                        spinner.stop();
-                        spinner_row.set_visible(false);
-                        state_label.set_label("Worker disconnected.");
-                        dictate_btn.set_label("  Start Dictating  ");
-                        dictate_btn.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                });
-            }
+                    glib::ControlFlow::Break
+                },
+                move || {
+                    ui_for_disconnect.apply_host_disconnect();
+                    glib::ControlFlow::Break
+                },
+            );
         });
     }
 
     // --- Copy button ---
     {
-        let last_cleaned = last_cleaned.clone();
-        let state_label = state_label.clone();
+        let ui = ui.clone();
         copy_btn.connect_clicked(move |_| {
-            let text = last_cleaned.borrow().clone();
-            if let Some(display) = gdk::Display::default() {
-                display.clipboard().set_text(&text);
-                state_label.set_label("Copied to clipboard");
-            }
+            ui.copy_last_cleaned_to_clipboard();
         });
+    }
+
+    // --- D-Bus signal subscription ---
+    {
+        if let Some(rx) = host_integration::subscribe_host_signals() {
+            let ui = ui.clone();
+            glib::timeout_add_local(Duration::from_millis(100), move || {
+                while let Ok(event) = rx.try_recv() {
+                    match event {
+                        HostEvent::StateChanged(state) => ui.apply_host_state(&state),
+                        HostEvent::TextReady { cleaned, raw_text } => {
+                            ui.show_transcript(&cleaned, &raw_text)
+                        }
+                        HostEvent::InsertionResult { ok, message } => {
+                            ui.apply_insertion_result(ok, &message)
+                        }
+                    }
+                }
+                glib::ControlFlow::Continue
+            });
+        }
     }
 
     // --- Type into app button ---
     {
+        let ui = ui.clone();
         type_btn.clone().connect_clicked(move |btn| {
-            let text = last_cleaned.borrow().clone();
+            let text = ui.last_cleaned.borrow().clone();
             if text.is_empty() {
                 return;
             }
-            btn.set_sensitive(false);
-            state_label.set_label("Sending to focused app\u{2026}");
+            ui.start_send_to_app();
 
             let (tx, rx) = mpsc::channel::<Result<String, String>>();
             let text_for_send = text.clone();
@@ -379,32 +476,72 @@ fn build_body(
                 let _ = tx.send(result);
             });
 
-            let state_label = state_label.clone();
+            let ui_for_value = ui.clone();
+            let ui_for_disconnect = ui.clone();
             let btn = btn.clone();
-            let text = text.clone();
-            glib::timeout_add_local(Duration::from_millis(80), move || match rx.try_recv() {
-                Ok(Ok(msg)) => {
-                    state_label.set_label(&msg);
+            let text_for_value = text.clone();
+            let text_for_disconnect = text.clone();
+            async_poll::poll_receiver(
+                rx,
+                ASYNC_POLL_INTERVAL,
+                move |result| {
+                    ui_for_value.finish_send_to_app(result, &text_for_value);
                     btn.set_sensitive(true);
                     glib::ControlFlow::Break
-                }
-                Ok(Err(err)) => {
-                    if let Some(display) = gdk::Display::default() {
-                        display.clipboard().set_text(&text);
-                        state_label.set_label(&format!("{err} Copied to clipboard instead."));
-                    } else {
-                        state_label.set_label(&format!("Send failed: {}", err));
-                    }
-                    btn.set_sensitive(true);
+                },
+                move || {
+                    ui_for_disconnect.finish_send_to_app(
+                        Err("The host companion disconnected.".into()),
+                        &text_for_disconnect,
+                    );
                     glib::ControlFlow::Break
-                }
-                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    btn.set_sensitive(true);
-                    glib::ControlFlow::Break
-                }
-            });
+                },
+            );
         });
+    }
+
+    // --- Keyboard shortcuts ---
+    {
+        let key_controller = gtk::EventControllerKey::new();
+        let dictate_btn = dictate_btn.clone();
+        let ui = ui.clone();
+        let transcript_bubble = transcript_bubble.clone();
+        key_controller.connect_key_pressed(move |_, keyval, _, modifier| {
+            match keyval {
+                gdk::Key::Return | gdk::Key::KP_Enter => {
+                    if dictate_btn.is_sensitive() {
+                        dictate_btn.emit_clicked();
+                    }
+                    glib::Propagation::Stop
+                }
+                gdk::Key::Escape => {
+                    if *ui.is_listening.borrow() {
+                        if dictate_btn.is_sensitive() {
+                            dictate_btn.emit_clicked();
+                        }
+                    } else if transcript_bubble.is_visible() {
+                        transcript_bubble.set_visible(false);
+                        ui.state_label.set_label("Ready");
+                    }
+                    glib::Propagation::Stop
+                }
+                gdk::Key::c if modifier.contains(gdk::ModifierType::CONTROL_MASK) => {
+                    if !*ui.is_listening.borrow() && transcript_bubble.is_visible() {
+                        let text = ui.last_cleaned.borrow().clone();
+                        if !text.is_empty() {
+                            if let Some(display) = gdk::Display::default() {
+                                display.clipboard().set_text(&text);
+                                ui.state_label.set_label("Copied to clipboard");
+                            }
+                        }
+                        return glib::Propagation::Stop;
+                    }
+                    glib::Propagation::Proceed
+                }
+                _ => glib::Propagation::Proceed,
+            }
+        });
+        window.add_controller(key_controller);
     }
 
     outer.upcast()
@@ -427,4 +564,20 @@ fn mode_chip_content(settings: &AppSettings) -> gtk::Box {
     row.append(&image);
     row.append(&label);
     row
+}
+
+fn friendly_error_message(error: &str) -> String {
+    if error.contains("unexpected error") {
+        return "Something went wrong while talking to the host companion.".into();
+    }
+    if error.contains("Host integration is not running") || error.contains("host companion") {
+        return "The host companion is not available right now.".into();
+    }
+    if error.contains("No dictation session is running") {
+        return "There is no active dictation to stop.".into();
+    }
+    if error.contains("private runtime directory") {
+        return "SayWrite could not access a private recording directory.".into();
+    }
+    error.to_string()
 }

@@ -1,12 +1,15 @@
 mod app;
-mod cleanup;
-mod config;
-mod dictation;
-mod host_api;
-mod host_integration;
-mod model_installer;
-mod runtime;
 mod ui;
+
+pub use saywrite::{
+    cleanup,
+    config,
+    dictation,
+    host_api,
+    host_integration,
+    model_installer,
+    runtime,
+};
 
 fn main() -> glib::ExitCode {
     app::run()
