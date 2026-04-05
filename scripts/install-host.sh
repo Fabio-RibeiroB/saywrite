@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BINDIR="${HOME}/.local/bin"
+DBUS_DIR="${HOME}/.local/share/dbus-1/services"
+SYSTEMD_DIR="${HOME}/.config/systemd/user"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BINARY="${SCRIPT_DIR}/target/release/saywrite-host"
+
+if [ ! -f "${BINARY}" ]; then
+    echo "Error: ${BINARY} not found. Run 'cargo build --release' first." >&2
+    exit 1
+fi
+
+echo "Installing saywrite-host companion daemon..."
+
+install -Dm755 "${BINARY}" "${BINDIR}/saywrite-host"
+
+mkdir -p "${SYSTEMD_DIR}"
+sed "s|ExecStart=.*|ExecStart=${BINDIR}/saywrite-host|" \
+    "${SCRIPT_DIR}/data/saywrite-host.service" > "${SYSTEMD_DIR}/saywrite-host.service"
+chmod 644 "${SYSTEMD_DIR}/saywrite-host.service"
+
+mkdir -p "${DBUS_DIR}"
+sed "s|Exec=.*|Exec=${BINDIR}/saywrite-host|" \
+    "${SCRIPT_DIR}/data/io.github.saywrite.Host.service" > "${DBUS_DIR}/io.github.saywrite.Host.service"
+chmod 644 "${DBUS_DIR}/io.github.saywrite.Host.service"
+
+systemctl --user daemon-reload
+systemctl --user enable --now saywrite-host.service
+
+echo "Host companion installed and running."
+echo "Check status: systemctl --user status saywrite-host"

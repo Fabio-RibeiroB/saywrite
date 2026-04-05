@@ -2,7 +2,8 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "${ROOT_DIR}"
-
-python3 -m saywrite_host.cli dictate-once
+busctl --user call \
+  io.github.saywrite.Host \
+  /io/github/saywrite/Host \
+  io.github.saywrite.Host \
+  ToggleDictation
