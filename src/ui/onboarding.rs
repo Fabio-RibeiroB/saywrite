@@ -4,7 +4,7 @@ use std::{cell::RefCell, rc::Rc};
 use adw::prelude::*;
 use gtk::{Align, Orientation};
 
-use crate::config::AppSettings;
+use crate::config::{AppSettings, ProviderMode};
 
 pub fn present<F>(app: &adw::Application, settings: Rc<RefCell<AppSettings>>, on_complete: F)
 where
@@ -84,7 +84,7 @@ fn mic_page(carousel: adw::Carousel) -> gtk::Box {
     title.add_css_class("title-2");
 
     let body = gtk::Label::builder()
-        .label("The final product should guide you through permission prompts and audio checks without sending you to external docs. This shell is being rebuilt around that principle.")
+        .label("SayWrite records through your default microphone. No drivers to install, no permissions to hunt down — it just works.")
         .wrap(true)
         .justify(gtk::Justification::Center)
         .build();
@@ -121,7 +121,7 @@ fn shortcut_page(carousel: adw::Carousel, settings: Rc<RefCell<AppSettings>>) ->
     title.add_css_class("title-2");
 
     let body = gtk::Label::builder()
-        .label("For now the product is converging on a single hands-free activation: Super+Alt+D. The long-term target is a proper host daemon, not a pile of visible setup switches.")
+        .label("Press one shortcut to start dictating. Press it again to stop. Your words appear wherever you're typing.")
         .wrap(true)
         .justify(gtk::Justification::Center)
         .build();
@@ -174,15 +174,15 @@ where
     cloud.add_css_class("pill");
 
     let current_mode = settings.borrow().provider_mode.clone();
-    local.set_active(current_mode != "cloud");
-    cloud.set_active(current_mode == "cloud");
+    local.set_active(current_mode != ProviderMode::Cloud);
+    cloud.set_active(current_mode == ProviderMode::Cloud);
 
     {
         let settings = settings.clone();
         local.connect_toggled(move |button| {
             if button.is_active() {
                 let mut state = settings.borrow_mut();
-                state.provider_mode = "local".into();
+                state.provider_mode = ProviderMode::Local;
                 let _ = state.save();
             }
         });
@@ -192,7 +192,7 @@ where
         cloud.connect_toggled(move |button| {
             if button.is_active() {
                 let mut state = settings.borrow_mut();
-                state.provider_mode = "cloud".into();
+                state.provider_mode = ProviderMode::Cloud;
                 let _ = state.save();
             }
         });
@@ -200,11 +200,11 @@ where
 
     let local_card = option_card(
         &local,
-        "Private, offline, and the default product path once the local runtime is in place.",
+        "Everything stays on your machine. Private, fast, and works offline.",
     );
     let cloud_card = option_card(
         &cloud,
-        "Useful for weaker hardware, but still secondary to the local-first product story.",
+        "Uses an external API for transcription. Good for older hardware.",
     );
 
     let button = gtk::Button::with_label("Open SayWrite");

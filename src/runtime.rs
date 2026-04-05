@@ -3,7 +3,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::config::{default_model_path, AppSettings};
+use crate::{
+    config::{default_model_path, AppSettings, ProviderMode},
+    dictation,
+    host_integration,
+};
 
 #[derive(Debug, Clone)]
 pub struct RuntimeProbe {
@@ -13,11 +17,17 @@ pub struct RuntimeProbe {
     pub whisper_cli_display: String,
     pub acceleration_label: String,
     pub insertion_label: String,
+    pub dictation_label: String,
+    pub provider_label: String,
 }
 
 pub fn probe_runtime(settings: &AppSettings) -> RuntimeProbe {
     let model_path = preferred_model_path(settings);
-    let whisper_cli = discover_whisper_cli();
+    let whisper_cli = dictation::discover_whisper_cli();
+    let provider_label = match settings.provider_mode {
+        ProviderMode::Cloud => "Cloud".into(),
+        ProviderMode::Local => "Local".into(),
+    };
 
     RuntimeProbe {
         local_model_present: model_path.exists(),
@@ -25,34 +35,25 @@ pub fn probe_runtime(settings: &AppSettings) -> RuntimeProbe {
         whisper_cli_found: whisper_cli.exists(),
         whisper_cli_display: shorten_path(&whisper_cli),
         acceleration_label: detect_acceleration(),
-        insertion_label: "Host helper today, IBus next".into(),
+        insertion_label: if host_integration::host_socket_present() {
+            "Host integration online".into()
+        } else {
+            "Clipboard fallback until host integration is running".into()
+        },
+        dictation_label: if dictation::active_session() {
+            "Live dictation session active".into()
+        } else {
+            "Ready for local dictation".into()
+        },
+        provider_label,
     }
 }
 
 fn preferred_model_path(settings: &AppSettings) -> PathBuf {
-    if settings.local_model_path.is_empty() {
-        return default_model_path();
+    if let Some(path) = &settings.local_model_path {
+        return path.clone();
     }
-    PathBuf::from(&settings.local_model_path)
-}
-
-fn discover_whisper_cli() -> PathBuf {
-    if let Ok(path) = env::var("SAYWRITE_WHISPER_CLI") {
-        return PathBuf::from(path);
-    }
-
-    let current = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let candidates = [
-        current.join("vendor/whisper.cpp/build/bin/whisper-cli"),
-        current.join("vendor/whisper.cpp/build/bin/Release/whisper-cli"),
-        current.join("vendor/whisper.cpp/build/bin/main"),
-    ];
-
-    candidates
-        .iter()
-        .find(|path| path.exists())
-        .cloned()
-        .unwrap_or_else(|| PathBuf::from("whisper-cli"))
+    default_model_path()
 }
 
 fn shorten_path(path: &Path) -> String {

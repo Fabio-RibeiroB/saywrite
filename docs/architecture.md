@@ -62,6 +62,12 @@ Possible backends:
 - faster-whisper style worker
 - remote provider as optional premium-like mode later
 
+Rust implementation note:
+
+- the GTK app should not shell out to legacy Python entrypoints
+- dictation orchestration, cleanup, and host communication live in Rust-owned crates and services
+- short-term external tool invocation is acceptable only behind Rust interfaces while the library/service path is completed
+
 ### 3. Host Integration Service
 
 This service is the hard requirement for system-wide usability.
@@ -98,6 +104,13 @@ Suggested boundary:
 - `io.github.fabio.SayWrite.App`
 - `io.github.fabio.SayWrite.Service`
 - `io.github.fabio.SayWrite.IBus`
+
+Suggested crate split:
+
+- `saywrite-app`: GTK/libadwaita shell
+- `saywrite-core`: config, cleanup, shared protocol types
+- `saywrite-service`: audio capture, VAD, ASR orchestration
+- `saywrite-host`: IBus and fallback host-side insertion
 
 Benefits:
 

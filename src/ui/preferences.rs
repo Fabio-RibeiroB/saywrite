@@ -5,7 +5,8 @@ use adw::prelude::*;
 use gtk::Align;
 
 use crate::{
-    config::AppSettings,
+    config::{AppSettings, ProviderMode},
+    host_integration,
     runtime::{probe_runtime, RuntimeProbe},
 };
 
@@ -40,12 +41,16 @@ fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage
         .subtitle("Choose the default dictation engine")
         .build();
     mode_row.set_model(Some(&gtk::StringList::new(&["Local", "Cloud"])));
-    mode_row.set_selected(if settings.borrow().provider_mode == "cloud" { 1 } else { 0 });
+    mode_row.set_selected(if settings.borrow().provider_mode == ProviderMode::Cloud { 1 } else { 0 });
     {
         let settings = settings.clone();
         mode_row.connect_selected_notify(move |row| {
             let mut state = settings.borrow_mut();
-            state.provider_mode = if row.selected() == 1 { "cloud".into() } else { "local".into() };
+            state.provider_mode = if row.selected() == 1 {
+                ProviderMode::Cloud
+            } else {
+                ProviderMode::Local
+            };
             let _ = state.save();
         });
     }
@@ -54,13 +59,21 @@ fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage
     let local_group = adw::PreferencesGroup::builder().title("Local Model").build();
     let model_row = adw::EntryRow::builder()
         .title("Model file path")
-        .text(&settings.borrow().local_model_path)
+        .text(
+            &settings
+                .borrow()
+                .local_model_path
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default(),
+        )
         .build();
     {
         let settings = settings.clone();
         model_row.connect_changed(move |row| {
             let mut state = settings.borrow_mut();
-            state.local_model_path = row.text().to_string();
+            let value = row.text().trim().to_string();
+            state.local_model_path = (!value.is_empty()).then(|| value.into());
             let _ = state.save();
         });
     }
@@ -109,12 +122,12 @@ fn build_shortcut_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPa
 
     let group = adw::PreferencesGroup::builder()
         .title("Hands-free activation")
-        .description("SayWrite now targets one obvious global action instead of exposing multiple conflicting flows.")
+        .description("Start and stop dictation from anywhere with a single shortcut.")
         .build();
 
     let shortcut_row = adw::ActionRow::builder()
-        .title("Current default")
-        .subtitle("GNOME shortcut installer scripts still own the actual system binding for now.")
+        .title("Global shortcut")
+        .subtitle("Press this key combination to toggle dictation.")
         .build();
     let shortcut_label = gtk::Label::builder()
         .label(&settings.borrow().global_shortcut_label)
@@ -126,8 +139,8 @@ fn build_shortcut_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPa
     shortcut_row.set_activatable(false);
 
     let note_row = adw::ActionRow::builder()
-        .title("Long-term direction")
-        .subtitle("Replace desktop-specific launch shortcuts with a real Rust host daemon that owns activation, recording, and insertion.")
+        .title("How it works")
+        .subtitle("SayWrite listens for this shortcut system-wide and starts recording immediately.")
         .build();
     note_row.set_activatable(false);
 
@@ -148,8 +161,12 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
 
     let note_group = adw::PreferencesGroup::builder().title("Status").build();
     let row = adw::ActionRow::builder()
-        .title("Migration phase")
-        .subtitle("The Rust shell is the new app surface. Python backend pieces remain in-tree until the service and insertion layers are migrated.")
+        .title("Text delivery")
+        .subtitle(if host_integration::host_socket_present() {
+            "Host service connected — text will be typed into the focused app."
+        } else {
+            "Host service not running — text will be copied to the clipboard."
+        })
         .build();
     note_group.add(&row);
     page.add(&note_group);
@@ -160,6 +177,8 @@ fn build_probe_group(title: &str, probe: &RuntimeProbe) -> adw::PreferencesGroup
     let group = adw::PreferencesGroup::builder().title(title).build();
 
     for (label, value) in [
+        ("Provider", probe.provider_label.clone()),
+        ("Dictation", probe.dictation_label.clone()),
         ("Acceleration", probe.acceleration_label.clone()),
         ("whisper.cpp", if probe.whisper_cli_found { format!("Found at {}", probe.whisper_cli_display) } else { "Not found yet".into() }),
         ("Model", if probe.local_model_present { probe.local_model_display.clone() } else { "No local model downloaded yet".into() }),

@@ -11,8 +11,9 @@ use adw::prelude::*;
 use gtk::{gdk, glib, Align, Orientation};
 
 use crate::{
-    bridge::{self, TranscriptResult},
     config::AppSettings,
+    dictation::{self, TranscriptResult},
+    host_integration,
     ui::preferences,
 };
 
@@ -20,8 +21,8 @@ pub fn present(app: &adw::Application, settings: Rc<RefCell<AppSettings>>) {
     let window = adw::ApplicationWindow::builder()
         .application(app)
         .title("SayWrite")
-        .default_width(480)
-        .default_height(400)
+        .default_width(640)
+        .default_height(560)
         .resizable(false)
         .build();
 
@@ -70,17 +71,17 @@ fn build_body(
     let outer = gtk::Box::new(Orientation::Vertical, 0);
     outer.set_valign(Align::Center);
     outer.set_vexpand(true);
-    outer.set_margin_top(24);
-    outer.set_margin_bottom(32);
-    outer.set_margin_start(32);
-    outer.set_margin_end(32);
+    outer.set_margin_top(40);
+    outer.set_margin_bottom(48);
+    outer.set_margin_start(48);
+    outer.set_margin_end(48);
 
     // Spinner (shown while starting/stopping)
     let spinner = gtk::Spinner::new();
     spinner.set_size_request(48, 48);
     spinner.set_halign(Align::Center);
 
-    let spinner_row = gtk::Box::new(Orientation::Vertical, 8);
+    let spinner_row = gtk::Box::new(Orientation::Vertical, 12);
     spinner_row.set_halign(Align::Center);
     spinner_row.append(&spinner);
     spinner_row.set_visible(false);
@@ -88,7 +89,7 @@ fn build_body(
     // State label
     let state_label = gtk::Label::new(Some("Ready"));
     state_label.add_css_class("state-label");
-    state_label.set_margin_top(8);
+    state_label.set_margin_top(12);
 
     // Transcript bubble
     let transcript_label = gtk::Label::new(None);
@@ -101,7 +102,7 @@ fn build_body(
     transcript_bubble.add_css_class("transcript-bubble");
     transcript_bubble.append(&transcript_label);
     transcript_bubble.set_visible(false);
-    transcript_bubble.set_margin_top(20);
+    transcript_bubble.set_margin_top(32);
 
     // Action row (copy + type, shown after result)
     let copy_btn = gtk::Button::with_label("Copy");
@@ -109,10 +110,11 @@ fn build_body(
 
     let type_btn = gtk::Button::with_label("Type into app");
     type_btn.add_css_class("pill");
+    type_btn.set_visible(host_integration::host_socket_present());
 
-    let action_row = gtk::Box::new(Orientation::Horizontal, 10);
+    let action_row = gtk::Box::new(Orientation::Horizontal, 16);
     action_row.set_halign(Align::Center);
-    action_row.set_margin_top(10);
+    action_row.set_margin_top(16);
     action_row.append(&copy_btn);
     action_row.append(&type_btn);
     action_row.set_visible(false);
@@ -123,7 +125,7 @@ fn build_body(
     dictate_btn.add_css_class("pill");
     dictate_btn.add_css_class("record-button");
     dictate_btn.set_halign(Align::Center);
-    dictate_btn.set_margin_top(24);
+    dictate_btn.set_margin_top(36);
 
     outer.append(&spinner_row);
     outer.append(&state_label);
@@ -160,8 +162,9 @@ fn build_body(
                 action_row.set_visible(false);
 
                 let (tx, rx) = mpsc::channel::<Result<String, String>>();
+                let settings_snapshot = settings.borrow().clone();
                 thread::spawn(move || {
-                    let result = bridge::start_live().map_err(|e| e.to_string());
+                    let result = dictation::start_live(&settings_snapshot).map_err(|e| e.to_string());
                     let _ = tx.send(result);
                 });
 
@@ -208,8 +211,9 @@ fn build_body(
                 state_label.set_label("Processing\u{2026}");
 
                 let (tx, rx) = mpsc::channel::<Result<TranscriptResult, String>>();
+                let settings_snapshot = settings.borrow().clone();
                 thread::spawn(move || {
-                    let result = bridge::stop_live().map_err(|e| e.to_string());
+                    let result = dictation::stop_live(&settings_snapshot).map_err(|e| e.to_string());
                     let _ = tx.send(result);
                 });
 
@@ -232,7 +236,11 @@ fn build_body(
                         spinner.stop();
                         spinner_row.set_visible(false);
 
-                        let cleaned = result.cleaned_text.clone();
+                        let cleaned = if result.cleaned_text.is_empty() {
+                            result.raw_text.clone()
+                        } else {
+                            result.cleaned_text.clone()
+                        };
                         let display = if cleaned.is_empty() {
                             "Nothing captured.".to_string()
                         } else {
@@ -263,11 +271,12 @@ fn build_body(
                             let (dtx, drx) = mpsc::channel::<Result<String, String>>();
                             let text = cleaned.clone();
                             thread::spawn(move || {
-                                let r = bridge::send_text(&text, 0.0).map_err(|e| e.to_string());
+                                let r = host_integration::send_text(&text, 0.0).map_err(|e| e.to_string());
                                 let _ = dtx.send(r);
                             });
                             let state_label = state_label.clone();
                             let type_btn = type_btn.clone();
+                            let cleaned = cleaned.clone();
                             glib::timeout_add_local(Duration::from_millis(80), move || {
                                 match drx.try_recv() {
                                     Ok(Ok(msg)) => {
@@ -276,7 +285,12 @@ fn build_body(
                                         glib::ControlFlow::Break
                                     }
                                     Ok(Err(err)) => {
-                                        state_label.set_label(&format!("Delivery failed: {}", err));
+                                        if let Some(disp) = gdk::Display::default() {
+                                            disp.clipboard().set_text(&cleaned);
+                                            state_label.set_label(&format!("{err} Copied to clipboard instead."));
+                                        } else {
+                                            state_label.set_label(&format!("Delivery failed: {}", err));
+                                        }
                                         type_btn.set_sensitive(true);
                                         glib::ControlFlow::Break
                                     }
@@ -343,13 +357,15 @@ fn build_body(
             state_label.set_label("Sending to focused app\u{2026}");
 
             let (tx, rx) = mpsc::channel::<Result<String, String>>();
+            let text_for_send = text.clone();
             thread::spawn(move || {
-                let result = bridge::send_text(&text, 0.0).map_err(|e| e.to_string());
+                let result = host_integration::send_text(&text_for_send, 0.0).map_err(|e| e.to_string());
                 let _ = tx.send(result);
             });
 
             let state_label = state_label.clone();
             let btn = btn.clone();
+            let text = text.clone();
             glib::timeout_add_local(Duration::from_millis(80), move || match rx.try_recv() {
                 Ok(Ok(msg)) => {
                     state_label.set_label(&msg);
@@ -357,7 +373,12 @@ fn build_body(
                     glib::ControlFlow::Break
                 }
                 Ok(Err(err)) => {
-                    state_label.set_label(&format!("Send failed: {}", err));
+                    if let Some(display) = gdk::Display::default() {
+                        display.clipboard().set_text(&text);
+                        state_label.set_label(&format!("{err} Copied to clipboard instead."));
+                    } else {
+                        state_label.set_label(&format!("Send failed: {}", err));
+                    }
                     btn.set_sensitive(true);
                     glib::ControlFlow::Break
                 }
@@ -375,24 +396,19 @@ fn build_body(
 
 fn mode_chip_content(settings: &AppSettings) -> gtk::Box {
     let row = gtk::Box::new(Orientation::Horizontal, 6);
-    let icon = if settings.provider_mode == "cloud" {
+    let icon = if matches!(settings.provider_mode, crate::config::ProviderMode::Cloud) {
         "network-wireless-symbolic"
     } else {
         "drive-harddisk-symbolic"
     };
     let image = gtk::Image::from_icon_name(icon);
     image.set_pixel_size(14);
-    let label = gtk::Label::new(Some(&capitalize(&settings.provider_mode)));
+    let label = gtk::Label::new(Some(match settings.provider_mode {
+        crate::config::ProviderMode::Cloud => "Cloud",
+        crate::config::ProviderMode::Local => "Local",
+    }));
     label.add_css_class("caption");
     row.append(&image);
     row.append(&label);
     row
-}
-
-fn capitalize(value: &str) -> String {
-    let mut chars = value.chars();
-    match chars.next() {
-        Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
-        None => String::new(),
-    }
 }

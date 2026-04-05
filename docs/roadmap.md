@@ -15,6 +15,7 @@
 - cleanup pipeline with deterministic rules
 - transcript preview and accept/reject controls
 - local and cloud provider selection in-product
+- remove Python as a runtime dependency of the Rust app
 
 Success criteria:
 
@@ -26,6 +27,7 @@ Success criteria:
 - tune latency budget
 - add model download/install flow
 - expose confidence and raw transcript debugging
+- move from CLI-oriented orchestration toward a long-lived Rust speech service
 
 Success criteria:
 
@@ -37,6 +39,7 @@ Success criteria:
 - D-Bus bridge between app and integration service
 - portal-based global hotkey registration where supported
 - fallback clipboard insertion mode
+- replace ad hoc host helper assumptions with a first-class Rust host service
 
 Success criteria:
 

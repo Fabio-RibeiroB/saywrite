@@ -22,10 +22,8 @@ pub fn run() -> glib::ExitCode {
 }
 
 fn activate(app: &adw::Application) {
-    if app.active_window().is_some() {
-        if let Some(window) = app.active_window() {
-            window.present();
-        }
+    if let Some(window) = app.active_window() {
+        window.present();
         return;
     }
 

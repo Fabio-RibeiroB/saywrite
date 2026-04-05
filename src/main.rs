@@ -1,6 +1,8 @@
 mod app;
-mod bridge;
+mod cleanup;
 mod config;
+mod dictation;
+mod host_integration;
 mod runtime;
 mod ui;
 

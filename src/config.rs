@@ -11,14 +11,21 @@ const SETTINGS_FILE_NAME: &str = "settings.json";
 const DEFAULT_CLOUD_API_BASE: &str = "https://api.openai.com/v1";
 const DEFAULT_SHORTCUT: &str = "Super+Alt+D";
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderMode {
+    Local,
+    Cloud,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default = "default_provider_mode")]
-    pub provider_mode: String,
+    pub provider_mode: ProviderMode,
     #[serde(default)]
     pub onboarding_complete: bool,
     #[serde(default)]
-    pub local_model_path: String,
+    pub local_model_path: Option<PathBuf>,
     #[serde(default = "default_cloud_api_base")]
     pub cloud_api_base: String,
     #[serde(default)]
@@ -37,11 +44,7 @@ impl Default for AppSettings {
         Self {
             provider_mode: default_provider_mode(),
             onboarding_complete: false,
-            local_model_path: if default_model.exists() {
-                default_model.to_string_lossy().into_owned()
-            } else {
-                String::new()
-            },
+            local_model_path: default_model.exists().then_some(default_model),
             cloud_api_base: default_cloud_api_base(),
             cloud_api_key: String::new(),
             auto_copy_cleaned_text: default_auto_copy(),
@@ -70,8 +73,8 @@ impl AppSettings {
             Err(_) => return Self::default(),
         };
 
-        if parsed.local_model_path.is_empty() && default_model.exists() {
-            parsed.local_model_path = default_model.to_string_lossy().into_owned();
+        if parsed.local_model_path.is_none() && default_model.exists() {
+            parsed.local_model_path = Some(default_model);
         }
 
         parsed
@@ -117,8 +120,8 @@ pub fn default_model_path() -> PathBuf {
     local_models_dir().join("ggml-base.en.bin")
 }
 
-fn default_provider_mode() -> String {
-    "local".into()
+fn default_provider_mode() -> ProviderMode {
+    ProviderMode::Local
 }
 
 fn default_cloud_api_base() -> String {
