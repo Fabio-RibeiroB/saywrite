@@ -1,10 +1,13 @@
 use libadwaita as adw;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, sync::mpsc, thread, time::Duration};
 
 use adw::prelude::*;
-use gtk::{Align, Orientation};
+use gtk::{glib, Align, Orientation};
 
-use crate::config::{AppSettings, ProviderMode};
+use crate::{
+    config::{AppSettings, ProviderMode},
+    model_installer,
+};
 
 pub fn present<F>(app: &adw::Application, settings: Rc<RefCell<AppSettings>>, on_complete: F)
 where
@@ -77,32 +80,91 @@ fn mic_page(carousel: adw::Carousel) -> gtk::Box {
     icon.add_css_class("onboarding-icon");
 
     let title = gtk::Label::builder()
-        .label("Microphone access stays inside the app")
+        .label("Let's check your microphone")
         .wrap(true)
         .justify(gtk::Justification::Center)
         .build();
     title.add_css_class("title-2");
 
     let body = gtk::Label::builder()
-        .label("SayWrite records through your default microphone. No drivers to install, no permissions to hunt down — it just works.")
+        .label("SayWrite records through your default microphone. Tap the button below to make sure it's working.")
         .wrap(true)
         .justify(gtk::Justification::Center)
         .build();
     body.add_css_class("body");
 
-    let button = gtk::Button::with_label("Continue");
-    button.add_css_class("suggested-action");
-    button.add_css_class("pill");
-    button.set_halign(Align::Center);
-    button.connect_clicked(move |_| {
-        let page = carousel.nth_page(2);
-        carousel.scroll_to(&page, true);
-    });
+    let status_label = gtk::Label::new(None);
+    status_label.add_css_class("caption");
+    status_label.set_margin_top(8);
+
+    let test_btn = gtk::Button::with_label("Test Microphone");
+    test_btn.add_css_class("suggested-action");
+    test_btn.add_css_class("pill");
+    test_btn.set_halign(Align::Center);
+
+    let continue_btn = gtk::Button::with_label("Continue");
+    continue_btn.add_css_class("suggested-action");
+    continue_btn.add_css_class("pill");
+    continue_btn.set_halign(Align::Center);
+    continue_btn.set_visible(false);
+
+    {
+        let status_label = status_label.clone();
+        let test_btn = test_btn.clone();
+        let continue_btn = continue_btn.clone();
+
+        test_btn.connect_clicked(move |btn| {
+            btn.set_sensitive(false);
+            status_label.set_label("Recording a short sample\u{2026}");
+
+            let (tx, rx) = mpsc::channel::<Result<bool, String>>();
+            thread::spawn(move || {
+                let result = test_mic_access();
+                let _ = tx.send(result);
+            });
+
+            let status_label = status_label.clone();
+            let test_btn = btn.clone();
+            let continue_btn = continue_btn.clone();
+
+            glib::timeout_add_local(Duration::from_millis(100), move || match rx.try_recv() {
+                Ok(Ok(true)) => {
+                    status_label.set_label("Microphone is working!");
+                    status_label.add_css_class("success");
+                    test_btn.set_visible(false);
+                    continue_btn.set_visible(true);
+                    glib::ControlFlow::Break
+                }
+                Ok(Ok(false)) | Ok(Err(_)) => {
+                    status_label.set_label("Could not detect audio. Check your mic and try again.");
+                    test_btn.set_sensitive(true);
+                    test_btn.set_label("Try Again");
+                    glib::ControlFlow::Break
+                }
+                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    status_label.set_label("Mic test failed unexpectedly.");
+                    test_btn.set_sensitive(true);
+                    glib::ControlFlow::Break
+                }
+            });
+        });
+    }
+
+    {
+        let carousel = carousel.clone();
+        continue_btn.connect_clicked(move |_| {
+            let page = carousel.nth_page(2);
+            carousel.scroll_to(&page, true);
+        });
+    }
 
     box_.append(&icon);
     box_.append(&title);
     box_.append(&body);
-    box_.append(&button);
+    box_.append(&test_btn);
+    box_.append(&status_label);
+    box_.append(&continue_btn);
     box_
 }
 
@@ -207,18 +269,138 @@ where
         "Uses an external API for transcription. Good for older hardware.",
     );
 
-    let button = gtk::Button::with_label("Open SayWrite");
-    button.add_css_class("suggested-action");
-    button.add_css_class("pill");
-    button.set_halign(Align::Center);
-    button.connect_clicked(move |_| on_complete());
+    // Download progress area (shown when downloading model)
+    let progress_label = gtk::Label::new(None);
+    progress_label.add_css_class("caption");
+    progress_label.set_margin_top(8);
+
+    let progress_bar = gtk::ProgressBar::new();
+    progress_bar.set_visible(false);
+    progress_bar.set_margin_top(4);
+
+    let finish_btn = gtk::Button::with_label("Open SayWrite");
+    finish_btn.add_css_class("suggested-action");
+    finish_btn.add_css_class("pill");
+    finish_btn.set_halign(Align::Center);
+
+    {
+        let settings_click = settings.clone();
+        let progress_label = progress_label.clone();
+        let progress_bar = progress_bar.clone();
+        let finish_btn = finish_btn.clone();
+        let on_complete = Rc::new(on_complete);
+
+        finish_btn.connect_clicked(move |btn| {
+            let mode = settings_click.borrow().provider_mode.clone();
+
+            // Cloud mode: no model needed, just finish
+            if mode == ProviderMode::Cloud {
+                on_complete();
+                return;
+            }
+
+            // Local mode: check if model exists
+            if model_installer::model_exists() {
+                on_complete();
+                return;
+            }
+
+            // Need to download model
+            btn.set_sensitive(false);
+            btn.set_label("Downloading model\u{2026}");
+            progress_bar.set_visible(true);
+            progress_label.set_label("Starting download\u{2026}");
+
+            let (tx, rx) = mpsc::channel::<Result<DownloadMsg, String>>();
+
+            thread::spawn(move || {
+                let result = model_installer::download_default_model(|progress| {
+                    let pct = progress
+                        .total_bytes
+                        .map(|total| progress.bytes_downloaded as f64 / total as f64);
+                    let label = match progress.total_bytes {
+                        Some(total) => format!(
+                            "{} / {}",
+                            model_installer::format_bytes(progress.bytes_downloaded),
+                            model_installer::format_bytes(total),
+                        ),
+                        None => model_installer::format_bytes(progress.bytes_downloaded),
+                    };
+                    let _ = tx.send(Ok(DownloadMsg::Progress { pct, label }));
+                });
+                match result {
+                    Ok(_) => {
+                        let _ = tx.send(Ok(DownloadMsg::Done));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(e.to_string()));
+                    }
+                }
+            });
+
+            let progress_label = progress_label.clone();
+            let progress_bar = progress_bar.clone();
+            let finish_btn = btn.clone();
+            let on_complete = on_complete.clone();
+            let settings_for_save = settings_click.clone();
+
+            glib::timeout_add_local(Duration::from_millis(100), move || match rx.try_recv() {
+                Ok(Ok(DownloadMsg::Progress { pct, label })) => {
+                    progress_label.set_label(&label);
+                    if let Some(fraction) = pct {
+                        progress_bar.set_fraction(fraction);
+                    } else {
+                        progress_bar.pulse();
+                    }
+                    glib::ControlFlow::Continue
+                }
+                Ok(Ok(DownloadMsg::Done)) => {
+                    progress_bar.set_fraction(1.0);
+                    progress_label.set_label("Model ready!");
+                    // Update settings with model path
+                    {
+                        let mut state = settings_for_save.borrow_mut();
+                        state.local_model_path =
+                            Some(crate::config::default_model_path());
+                        let _ = state.save();
+                    }
+                    on_complete();
+                    glib::ControlFlow::Break
+                }
+                Ok(Err(err)) => {
+                    progress_bar.set_visible(false);
+                    progress_label.set_label(&format!("Download failed: {err}"));
+                    finish_btn.set_sensitive(true);
+                    finish_btn.set_label("Try Again");
+                    model_installer::cleanup_partial();
+                    glib::ControlFlow::Break
+                }
+                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    progress_bar.set_visible(false);
+                    progress_label.set_label("Download failed unexpectedly.");
+                    finish_btn.set_sensitive(true);
+                    finish_btn.set_label("Try Again");
+                    model_installer::cleanup_partial();
+                    glib::ControlFlow::Break
+                }
+            });
+        });
+    }
 
     box_.append(&icon);
     box_.append(&title);
     box_.append(&local_card);
     box_.append(&cloud_card);
-    box_.append(&button);
+    box_.append(&progress_bar);
+    box_.append(&progress_label);
+    box_.append(&finish_btn);
     box_
+}
+
+enum DownloadMsg {
+    Progress { pct: Option<f64>, label: String },
+    Done,
 }
 
 fn vertical_card() -> gtk::Box {
@@ -245,4 +427,47 @@ fn option_card(button: &gtk::CheckButton, copy: &str) -> gtk::Box {
     card.append(button);
     card.append(&label);
     card
+}
+
+/// Test microphone access by running a short GStreamer capture.
+/// Returns Ok(true) if audio data was captured, Ok(false) if silent/empty.
+fn test_mic_access() -> Result<bool, String> {
+    use std::{fs, path::PathBuf, process::Command};
+
+    let tmp_dir = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("saywrite");
+    let _ = fs::create_dir_all(&tmp_dir);
+    let test_file = tmp_dir.join("mic-test.wav");
+
+    // Record 1.5 seconds of audio
+    let status = Command::new("timeout")
+        .args(["2", "gst-launch-1.0", "-q", "-e",
+            "autoaudiosrc", "!",
+            "audioconvert", "!",
+            "audioresample", "!",
+            "audio/x-raw,rate=16000,channels=1", "!",
+            "wavenc", "!",
+            "filesink", &format!("location={}", test_file.display()),
+        ])
+        .status()
+        .map_err(|e| format!("failed to run mic test: {e}"))?;
+
+    // timeout returns 124 on timeout (which is expected — we want it to stop)
+    // gst-launch returns non-zero on actual errors
+    let file_ok = test_file.exists()
+        && fs::metadata(&test_file)
+            .map(|m| m.len() > 100)
+            .unwrap_or(false);
+
+    let _ = fs::remove_file(&test_file);
+
+    if file_ok {
+        Ok(true)
+    } else if !status.success() && status.code() != Some(124) {
+        Err("GStreamer could not access the microphone.".into())
+    } else {
+        Ok(false)
+    }
 }

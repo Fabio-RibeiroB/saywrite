@@ -14,6 +14,8 @@ use crate::{
     config::AppSettings,
     dictation::{self, TranscriptResult},
     host_integration,
+    model_installer,
+    runtime,
     ui::preferences,
 };
 
@@ -110,7 +112,7 @@ fn build_body(
 
     let type_btn = gtk::Button::with_label("Type into app");
     type_btn.add_css_class("pill");
-    type_btn.set_visible(host_integration::host_socket_present());
+    type_btn.set_visible(host_integration::host_available());
 
     let action_row = gtk::Box::new(Orientation::Horizontal, 16);
     action_row.set_halign(Align::Center);
@@ -126,6 +128,20 @@ fn build_body(
     dictate_btn.add_css_class("record-button");
     dictate_btn.set_halign(Align::Center);
     dictate_btn.set_margin_top(36);
+
+    // Check readiness and gate the button
+    {
+        let probe = runtime::probe_runtime(&settings.borrow());
+        if settings.borrow().provider_mode == crate::config::ProviderMode::Local {
+            if !probe.whisper_cli_found {
+                state_label.set_label("whisper.cpp not found — check Diagnostics in Settings");
+                dictate_btn.set_sensitive(false);
+            } else if !probe.local_model_present && !model_installer::model_exists() {
+                state_label.set_label("No model downloaded — open Settings to install one");
+                dictate_btn.set_sensitive(false);
+            }
+        }
+    }
 
     outer.append(&spinner_row);
     outer.append(&state_label);

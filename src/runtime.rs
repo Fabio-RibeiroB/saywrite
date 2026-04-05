@@ -35,7 +35,7 @@ pub fn probe_runtime(settings: &AppSettings) -> RuntimeProbe {
         whisper_cli_found: whisper_cli.exists(),
         whisper_cli_display: shorten_path(&whisper_cli),
         acceleration_label: detect_acceleration(),
-        insertion_label: if host_integration::host_socket_present() {
+        insertion_label: if host_integration::host_available() {
             "Host integration online".into()
         } else {
             "Clipboard fallback until host integration is running".into()

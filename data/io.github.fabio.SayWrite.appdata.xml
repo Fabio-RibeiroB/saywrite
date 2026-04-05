@@ -2,23 +2,33 @@
 <component type="desktop-application">
   <id>io.github.fabio.SayWrite</id>
   <name>SayWrite</name>
-  <summary>Linux dictation focused on UX and system-wide text entry</summary>
+  <summary>Speak naturally, get clean text anywhere</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
   <developer_name>Fabio</developer_name>
   <description>
     <p>
-      SayWrite is a Linux-first dictation product scaffold built around a modern Rust
-      and libadwaita application shell, a future host-side integration service, and a
-      cleanup pipeline that turns rough speech into usable text.
+      SayWrite turns your voice into polished text. Press a shortcut, speak
+      naturally, and your words land — cleaned up and ready to use — wherever
+      you're typing.
+    </p>
+    <p>
+      Runs entirely on your machine by default. No account needed, no data
+      leaves your computer. Optionally connect a cloud API for faster results
+      on older hardware.
     </p>
   </description>
   <launchable type="desktop-id">io.github.fabio.SayWrite.desktop</launchable>
   <provides>
     <binary>saywrite</binary>
   </provides>
+  <categories>
+    <category>Utility</category>
+    <category>AudioVideo</category>
+    <category>Office</category>
+  </categories>
   <content_rating type="oars-1.1" />
   <releases>
-    <release version="0.2.0" date="2026-04-04" />
+    <release version="0.2.0" date="2025-04-05" />
   </releases>
 </component>

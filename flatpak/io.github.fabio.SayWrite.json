@@ -3,6 +3,7 @@
   "runtime": "org.gnome.Platform",
   "runtime-version": "46",
   "sdk": "org.gnome.Sdk",
+  "sdk-extensions": ["org.freedesktop.Sdk.Extension.rust-stable"],
   "command": "saywrite",
   "finish-args": [
     "--share=ipc",
@@ -10,15 +11,37 @@
     "--socket=wayland",
     "--socket=pulseaudio",
     "--device=dri",
-    "--talk-name=org.freedesktop.portal.Desktop"
+    "--share=network",
+    "--talk-name=org.freedesktop.portal.Desktop",
+    "--talk-name=io.github.saywrite.Host"
   ],
+  "build-options": {
+    "append-path": "/usr/lib/sdk/rust-stable/bin"
+  },
   "modules": [
+    {
+      "name": "whisper-cpp",
+      "buildsystem": "cmake-ninja",
+      "builddir": true,
+      "config-opts": [
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DWHISPER_BUILD_TESTS=OFF",
+        "-DWHISPER_BUILD_EXAMPLES=ON",
+        "-DGGML_NATIVE=OFF"
+      ],
+      "sources": [
+        {
+          "type": "dir",
+          "path": "../vendor/whisper.cpp"
+        }
+      ],
+      "post-install": [
+        "install -Dm755 bin/whisper-cli /app/bin/whisper-cli"
+      ]
+    },
     {
       "name": "saywrite",
       "buildsystem": "simple",
-      "build-options": {
-        "append-path": "/usr/lib/sdk/rust-stable/bin"
-      },
       "build-commands": [
         "cargo --offline --locked build --release || cargo build --release",
         "install -Dm755 target/release/saywrite /app/bin/saywrite",

@@ -1,0 +1,12 @@
+[Unit]
+Description=SayWrite host daemon
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=saywrite-host
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

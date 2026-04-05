@@ -1,9 +1,10 @@
 [Desktop Entry]
 Name=SayWrite
-Comment=Polished Linux dictation shell
+Comment=Speak naturally, get clean text anywhere
 Exec=saywrite
 Icon=io.github.fabio.SayWrite
 Terminal=false
 Type=Application
 Categories=Utility;AudioVideo;Office;
 StartupNotify=true
+Keywords=dictation;speech;voice;transcription;

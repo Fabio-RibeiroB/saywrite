@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=io.github.saywrite.Host
+Exec=saywrite-host
+SystemdService=saywrite-host.service

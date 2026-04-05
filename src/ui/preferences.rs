@@ -1,12 +1,13 @@
 use libadwaita as adw;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, sync::mpsc, thread, time::Duration};
 
 use adw::prelude::*;
-use gtk::Align;
+use gtk::{glib, Align};
 
 use crate::{
     config::{AppSettings, ProviderMode},
     host_integration,
+    model_installer,
     runtime::{probe_runtime, RuntimeProbe},
 };
 
@@ -60,7 +61,7 @@ fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage
     let model_row = adw::EntryRow::builder()
         .title("Model file path")
         .text(
-            &settings
+            settings
                 .borrow()
                 .local_model_path
                 .as_ref()
@@ -78,6 +79,89 @@ fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage
         });
     }
     local_group.add(&model_row);
+
+    let install_row = adw::ActionRow::builder()
+        .title("Default model")
+        .subtitle(if model_installer::model_exists() {
+            "ggml-base.en — installed"
+        } else {
+            "ggml-base.en — not installed (~142 MB)"
+        })
+        .build();
+
+    let install_btn = gtk::Button::with_label(if model_installer::model_exists() {
+        "Installed"
+    } else {
+        "Download"
+    });
+    install_btn.set_valign(Align::Center);
+    if model_installer::model_exists() {
+        install_btn.set_sensitive(false);
+    } else {
+        install_btn.add_css_class("suggested-action");
+    }
+
+    {
+        let install_btn = install_btn.clone();
+        let install_row = install_row.clone();
+        let settings = settings.clone();
+        install_btn.clone().connect_clicked(move |btn| {
+            btn.set_sensitive(false);
+            btn.set_label("Downloading\u{2026}");
+
+            let (tx, rx) = mpsc::channel::<Result<String, String>>();
+            thread::spawn(move || {
+                let result = model_installer::download_default_model(|progress| {
+                    let msg = match progress.total_bytes {
+                        Some(total) => format!(
+                            "{} / {}",
+                            model_installer::format_bytes(progress.bytes_downloaded),
+                            model_installer::format_bytes(total),
+                        ),
+                        None => model_installer::format_bytes(progress.bytes_downloaded),
+                    };
+                    // Progress updates are frequent; we don't need every one
+                    drop(msg);
+                });
+                match result {
+                    Ok(_) => { let _ = tx.send(Ok("done".into())); }
+                    Err(e) => { let _ = tx.send(Err(e.to_string())); }
+                }
+            });
+
+            let btn = btn.clone();
+            let install_row = install_row.clone();
+            let settings = settings.clone();
+            glib::timeout_add_local(Duration::from_millis(200), move || match rx.try_recv() {
+                Ok(Ok(_)) => {
+                    btn.set_label("Installed");
+                    btn.remove_css_class("suggested-action");
+                    install_row.set_subtitle("ggml-base.en — installed");
+                    let mut state = settings.borrow_mut();
+                    state.local_model_path = Some(crate::config::default_model_path());
+                    let _ = state.save();
+                    glib::ControlFlow::Break
+                }
+                Ok(Err(err)) => {
+                    btn.set_label("Retry");
+                    btn.set_sensitive(true);
+                    install_row.set_subtitle(&format!("Download failed: {err}"));
+                    model_installer::cleanup_partial();
+                    glib::ControlFlow::Break
+                }
+                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    btn.set_label("Retry");
+                    btn.set_sensitive(true);
+                    model_installer::cleanup_partial();
+                    glib::ControlFlow::Break
+                }
+            });
+        });
+    }
+
+    install_row.add_suffix(&install_btn);
+    local_group.add(&install_row);
 
     let cloud_group = adw::PreferencesGroup::builder().title("Cloud API").build();
     let base_row = adw::EntryRow::builder()
@@ -162,7 +246,7 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
     let note_group = adw::PreferencesGroup::builder().title("Status").build();
     let row = adw::ActionRow::builder()
         .title("Text delivery")
-        .subtitle(if host_integration::host_socket_present() {
+        .subtitle(if host_integration::host_available() {
             "Host service connected — text will be typed into the focused app."
         } else {
             "Host service not running — text will be copied to the clipboard."

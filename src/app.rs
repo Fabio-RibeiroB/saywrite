@@ -17,7 +17,7 @@ pub fn run() -> glib::ExitCode {
         .build();
 
     app.connect_startup(|_| load_css());
-    app.connect_activate(|app| activate(app));
+    app.connect_activate(activate);
     app.run()
 }
 
