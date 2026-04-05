@@ -66,7 +66,9 @@ pub fn probe(settings: &AppSettings) -> HotkeyStatus {
 /// for activations. On each activation, calls ToggleDictation on the host
 /// D-Bus interface.
 pub async fn register_and_listen() -> Result<()> {
-    let conn = Connection::session().await.context("no D-Bus session bus")?;
+    let conn = Connection::session()
+        .await
+        .context("no D-Bus session bus")?;
 
     let portal = Proxy::new(
         &conn,
@@ -82,7 +84,13 @@ pub async fn register_and_listen() -> Result<()> {
 
     // 2. BindShortcuts
     let settings = AppSettings::load();
-    bind_shortcuts(&conn, &portal, &session_handle, &settings.global_shortcut_label).await?;
+    bind_shortcuts(
+        &conn,
+        &portal,
+        &session_handle,
+        &settings.global_shortcut_label,
+    )
+    .await?;
 
     PORTAL_ACTIVE.store(true, Ordering::Relaxed);
     eprintln!("GlobalShortcuts portal: shortcut bound, listening for activations");
@@ -228,16 +236,23 @@ async fn wait_for_response(
                 Err(_) => continue,
             };
             let path = header.path().ok().flatten().map(|p| p.as_str().to_string());
-            let member = header.member().ok().flatten().map(|m| m.as_str().to_string());
-            let interface = header.interface().ok().flatten().map(|i| i.as_str().to_string());
+            let member = header
+                .member()
+                .ok()
+                .flatten()
+                .map(|m| m.as_str().to_string());
+            let interface = header
+                .interface()
+                .ok()
+                .flatten()
+                .map(|i| i.as_str().to_string());
 
             if path.as_deref() == Some(request_path)
                 && interface.as_deref() == Some("org.freedesktop.portal.Request")
                 && member.as_deref() == Some("Response")
             {
-                let body: (u32, HashMap<String, OwnedValue>) = msg
-                    .body()
-                    .context("failed to parse Response body")?;
+                let body: (u32, HashMap<String, OwnedValue>) =
+                    msg.body().context("failed to parse Response body")?;
                 let (response_code, results) = body;
                 if response_code != 0 {
                     return Err(anyhow!(
@@ -246,10 +261,7 @@ async fn wait_for_response(
                     ));
                 }
                 if let Some(session_val) = results.get("session_handle") {
-                    let session_str: String = session_val
-                        .clone()
-                        .try_into()
-                        .unwrap_or_default();
+                    let session_str: String = session_val.clone().try_into().unwrap_or_default();
                     if !session_str.is_empty() {
                         return Ok(ObjectPath::try_from(session_str)
                             .context("invalid session handle path")?
@@ -262,7 +274,9 @@ async fn wait_for_response(
                     .into_owned());
             }
         }
-        Err(anyhow!("D-Bus stream ended while waiting for portal response"))
+        Err(anyhow!(
+            "D-Bus stream ended while waiting for portal response"
+        ))
     })
     .await;
 
@@ -342,7 +356,9 @@ fn portal_interface_available() -> bool {
 
 fn gnome_shortcuts_supported() -> bool {
     let current = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
-    current.split(':').any(|part| part.eq_ignore_ascii_case("gnome"))
+    current
+        .split(':')
+        .any(|part| part.eq_ignore_ascii_case("gnome"))
 }
 
 fn custom_shortcut_hint(shortcut: &str) -> String {

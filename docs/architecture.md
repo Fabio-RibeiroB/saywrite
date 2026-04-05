@@ -1,5 +1,9 @@
 # Architecture
 
+Status: historical design/rationale document.
+
+Do not treat this as the current implementation plan. Use `next_steps.md` and `holistic_review.md` for current state and priorities.
+
 ## Core Constraint
 
 If the product must work in "basically any text input in Linux," the integration point matters more than the speech model.

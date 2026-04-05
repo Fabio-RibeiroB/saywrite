@@ -30,5 +30,21 @@ chmod 644 "${DBUS_DIR}/io.github.saywrite.Host.service"
 systemctl --user daemon-reload
 systemctl --user enable --now saywrite-host.service
 
-echo "Host companion installed and running."
-echo "Check status: systemctl --user status saywrite-host"
+echo
+echo "SayWrite host companion is installed."
+echo "  Binary: ${BINDIR}/saywrite-host"
+echo "  User service: ${SYSTEMD_DIR}/saywrite-host.service"
+echo "  D-Bus activation: ${DBUS_DIR}/io.github.saywrite.Host.service"
+echo
+echo "Host status:"
+systemctl --user --no-pager --full status saywrite-host.service | sed -n '1,8p'
+echo
+echo "Useful commands:"
+echo "  systemctl --user status saywrite-host"
+echo "  journalctl --user -u saywrite-host -f"
+
+if [[ "${XDG_CURRENT_DESKTOP:-}" == *GNOME* ]] || [[ "${XDG_CURRENT_DESKTOP:-}" == *gnome* ]]; then
+    echo
+    echo "Optional GNOME shortcut fallback:"
+    echo "  bash scripts/install-gnome-shortcut.sh"
+fi

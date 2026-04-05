@@ -8,8 +8,7 @@ use anyhow::{anyhow, Context, Result};
 
 use crate::config::{default_model_path, local_models_dir, model_path_for_size, ModelSize};
 
-const MODEL_BASE_URL: &str =
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/";
+const MODEL_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/";
 const INSTALLED_MODEL_MIN_BYTES: u64 = 1_000;
 const VALID_MODEL_MIN_BYTES: u64 = 1_000_000;
 
@@ -134,9 +133,7 @@ where
     drop(file);
 
     // Validate: file shouldn't be tiny (corrupt/empty)
-    let size_on_disk = fs::metadata(&part_path)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let size_on_disk = fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
     if size_on_disk < VALID_MODEL_MIN_BYTES {
         let _ = fs::remove_file(&part_path);
         return Err(anyhow!(

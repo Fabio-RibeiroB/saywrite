@@ -1,83 +1,13 @@
-# SayWrite Implementation Plan
+# Archived Implementation Plan
 
-## Current State (April 2025)
+This document is historical and no longer reflects the current repo state.
 
-Pure Rust GTK4/libadwaita app with a companion host daemon. No Python. Both binaries compile, clippy clean, 9 tests pass.
+Use these instead:
 
-### App (`saywrite`)
+- `next_steps.md` for the active plan
+- `holistic_review.md` for the current codebase assessment
 
-- **`src/config.rs`** — `AppSettings`, `ProviderMode` enum, XDG-compliant paths
-- **`src/cleanup.rs`** — deterministic transcript cleanup (filler removal, spoken punctuation, capitalization). 9 passing tests.
-- **`src/dictation.rs`** — GStreamer mic capture via `gst-launch-1.0`, whisper.cpp CLI transcription, thread-safe session state
-- **`src/model_installer.rs`** — downloads `ggml-base.en.bin` from Hugging Face with progress callbacks, atomic write, size validation
-- **`src/host_integration.rs`** — D-Bus client (tries `InsertText` via zbus first), Unix socket fallback, clipboard last resort
-- **`src/host_api.rs`** — shared D-Bus contract constants (bus name, object path, state strings)
-- **`src/runtime.rs`** — readiness probing (model, whisper CLI, host availability, acceleration)
-- **`src/ui/onboarding.rs`** — 4-step carousel: welcome → mic test (real GStreamer capture) → shortcut → engine (inline model download with progress bar)
-- **`src/ui/main_window.rs`** — dictation window (640×560), readiness-gated Start button
-- **`src/ui/preferences.rs`** — settings with model download button, live host status display
-
-### Host daemon (`saywrite-host`)
-
-- **`src/bin/saywrite-host/main.rs`** — long-lived daemon, graceful shutdown on SIGINT/SIGTERM
-- **`src/bin/saywrite-host/dbus.rs`** — owns `io.github.saywrite.Host` on session bus; implements `GetStatus`, `InsertText`, `ToggleDictation`; emits `DictationStateChanged`, `TextReady`, `InsertionResult` signals
-- **`src/bin/saywrite-host/insertion.rs`** — auto-detects `wtype`, `xdotool`, `wl-copy`, `xclip`, `xsel`; clipboard fallback
-- **`src/bin/saywrite-host/hotkey.rs`** — detects GlobalShortcuts portal presence, prints `busctl` fallback instructions
-
-### Packaging
-
-- **`flatpak/io.github.fabio.SayWrite.json`** — builds whisper.cpp from vendored source, installs `whisper-cli` to `/app/bin/`, grants mic + network + D-Bus permissions
-- **`data/`** — desktop file, AppStream metainfo, D-Bus activation file, systemd user service
-
----
-
-## What's Next
-
-### 1. Flatpak end-to-end verification
-
-The manifest is written but hasn't been tested in a real `flatpak-builder` run.
-
-- Run `flatpak-builder --force-clean build flatpak/io.github.fabio.SayWrite.json`
-- Fix any build failures (missing SDK extensions, whisper.cpp cmake flags, GStreamer plugin availability in sandbox)
-- Verify: app launches in sandbox, mic capture works, `whisper-cli` is at `/app/bin/whisper-cli`
-- Verify: model download works from inside sandbox (needs `--share=network`)
-- Verify: D-Bus talk-name permission allows communication with host daemon running outside sandbox
-
-### 2. GlobalShortcuts portal registration
-
-`src/bin/saywrite-host/hotkey.rs` currently detects portal presence but doesn't register a shortcut.
-
-- Add `ashpd` crate dependency
-- Implement `org.freedesktop.portal.GlobalShortcuts` registration
-  - `CreateSession` → `BindShortcuts` with the configured key combo
-  - Listen for `Activated` signal → call `ToggleDictation` internally
-- Handle portal unavailability gracefully (already prints fallback instructions)
-- Test on GNOME 44+ and KDE Plasma 5.27+
-
-### 3. IBus text insertion
-
-`src/bin/saywrite-host/insertion.rs` currently uses command-based backends (`wtype`, `xdotool`). IBus is the correct primary path for Wayland.
-
-- Connect to IBus bus via D-Bus (`org.freedesktop.IBus`)
-- Get current input context
-- Commit text string directly into the focused field
-- Fall back to existing command-based backends if IBus unavailable
-- Report active insertion method through `GetStatus`
-
-### 4. App ↔ Host signal handling
-
-The app can call host methods via D-Bus but doesn't listen for signals yet.
-
-- Subscribe to `DictationStateChanged` signal in `host_integration.rs`
-- When host triggers dictation via hotkey, update main window UI (state label, button style) in real time
-- Subscribe to `TextReady` signal to show transcript in the app even when dictation was started from the host
-- This requires bridging async zbus signal streams into the GLib main loop
-
-### 5. Cloud provider wiring
-
-`src/dictation.rs` currently rejects `ProviderMode::Cloud` with an error message. Wire it up.
-
-- Add an HTTP transcription path (OpenAI-compatible `/v1/audio/transcriptions` endpoint)
+This file is intentionally kept only as a record of an earlier planning phase.
 - Use `ureq` (already a dependency) to POST the WAV file with the configured API key
 - Parse response, run through `cleanup_transcript`, return `TranscriptResult`
 - Skip whisper-cli and model checks when in Cloud mode

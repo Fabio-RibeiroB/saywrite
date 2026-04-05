@@ -194,7 +194,7 @@ fn shortcut_page(carousel: adw::Carousel, settings: Rc<RefCell<AppSettings>>) ->
     title.add_css_class("title-2");
 
     let body = gtk::Label::builder()
-        .label("Press one shortcut to start dictating. Press it again to stop. The host companion handles capture and types your cleaned text back into the field you were using.")
+        .label("Press one shortcut to start dictating. Press it again to stop. The host companion handles capture and delivers your cleaned text back to the field you were using. On supported desktops, that means direct typing. Otherwise, SayWrite falls back to the clipboard.")
         .wrap(true)
         .justify(gtk::Justification::Center)
         .build();
@@ -377,8 +377,7 @@ where
                             progress_label.set_label("Model ready!");
                             {
                                 let mut state = settings_for_save.borrow_mut();
-                                state.local_model_path =
-                                    Some(crate::config::default_model_path());
+                                state.local_model_path = Some(crate::config::default_model_path());
                                 let _ = state.save();
                             }
                             on_complete();

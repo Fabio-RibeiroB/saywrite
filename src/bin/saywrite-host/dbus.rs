@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use anyhow::{Context, Result};
 use saywrite::{
@@ -21,6 +21,7 @@ use crate::{
 struct SharedState {
     dictation_state: String,
     last_status: String,
+    last_toggle_at: Option<Instant>,
     insertion: InsertionStatus,
     connection: Option<Connection>,
 }
@@ -32,6 +33,7 @@ pub struct HostDaemon {
 
 struct HostDaemonInner {
     state: Mutex<SharedState>,
+    toggle_guard: Mutex<()>,
 }
 
 struct HostInterface {
@@ -44,6 +46,7 @@ impl HostDaemon {
         let state = SharedState {
             dictation_state: STATE_IDLE.into(),
             last_status: "Host daemon initialized.".into(),
+            last_toggle_at: None,
             insertion,
             connection: None,
         };
@@ -51,6 +54,7 @@ impl HostDaemon {
         Ok(Self {
             inner: Arc::new(HostDaemonInner {
                 state: Mutex::new(state),
+                toggle_guard: Mutex::new(()),
             }),
         })
     }
@@ -83,7 +87,7 @@ impl HostDaemon {
 
 #[dbus_interface(name = "io.github.saywrite.Host")]
 impl HostInterface {
-    async fn get_status(&self) -> (String, bool, bool) {
+    async fn get_status(&self) -> (String, bool, bool, String, String) {
         let hotkey = hotkey::probe(&AppSettings::load());
         let insertion = insertion::probe();
         let mut state = self.inner.state.lock().await;
@@ -95,14 +99,22 @@ impl HostInterface {
             ),
             hotkey_active: hotkey.active,
             insertion_available: state.insertion.available,
+            insertion_capability: state.insertion.capability.clone(),
+            insertion_backend: state.insertion.method.clone(),
         };
-        (status.status, status.hotkey_active, status.insertion_available)
+        (
+            status.status,
+            status.hotkey_active,
+            status.insertion_available,
+            status.insertion_capability,
+            status.insertion_backend,
+        )
     }
 
-    async fn insert_text(&self, text: &str) -> (bool, String) {
+    async fn insert_text(&self, text: &str) -> (bool, String, String) {
         let result = insertion::insert_text(text).await;
-        let message = match &result {
-            Ok(message) => message.clone(),
+        let (result_kind, message) = match &result {
+            Ok(outcome) => (outcome.result_kind.clone(), outcome.message.clone()),
             Err(err) => sanitize_error(err),
         };
 
@@ -113,12 +125,27 @@ impl HostInterface {
         }
 
         if let Some(ctxt) = self.signal_context().await {
-            let _ = Self::insertion_result(&ctxt, result.is_ok(), &message).await;
+            let _ = Self::insertion_result(&ctxt, result.is_ok(), &result_kind, &message).await;
         }
-        (result.is_ok(), message)
+        (result.is_ok(), result_kind, message)
     }
 
     async fn toggle_dictation(&self) -> (bool, String) {
+        let _toggle_guard = match self.inner.toggle_guard.try_lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                let message =
+                    "Dictation is already changing state. Release the shortcut and try again."
+                        .to_string();
+                self.transition_state_message(&message).await;
+                return (false, message);
+            }
+        };
+
+        if let Some(message) = self.reject_if_repeated_toggle().await {
+            return (false, message);
+        }
+
         let settings = AppSettings::load();
         let listening = {
             let state = self.inner.state.lock().await;
@@ -126,7 +153,8 @@ impl HostInterface {
         };
 
         if !listening {
-            self.transition_state(STATE_PROCESSING, "Starting dictation.").await;
+            self.transition_state(STATE_PROCESSING, "Starting dictation.")
+                .await;
             self.emit_state(STATE_PROCESSING).await;
 
             match tokio::task::spawn_blocking(move || dictation::start_live(&settings)).await {
@@ -138,14 +166,14 @@ impl HostInterface {
                 }
                 Ok(Err(err)) => {
                     eprintln!("ToggleDictation start error: {err:#}");
-                    let message = sanitize_error(&err);
+                    let (_, message) = sanitize_error(&err);
                     self.transition_state(STATE_IDLE, &message).await;
                     self.emit_state(STATE_IDLE).await;
                     (false, message)
                 }
                 Err(err) => {
                     eprintln!("ToggleDictation start task error: {err}");
-                    let message = sanitize_error(&anyhow::Error::new(err));
+                    let (_, message) = sanitize_error(&anyhow::Error::new(err));
                     self.transition_state(STATE_IDLE, &message).await;
                     self.emit_state(STATE_IDLE).await;
                     (false, message)
@@ -170,13 +198,14 @@ impl HostInterface {
                     }
 
                     let insertion_result = insertion::insert_text(&cleaned_text).await;
-                    let insertion_message = match &insertion_result {
-                        Ok(message) => message.clone(),
+                    let (result_kind, insertion_message) = match &insertion_result {
+                        Ok(outcome) => (outcome.result_kind.clone(), outcome.message.clone()),
                         Err(err) => sanitize_error(err),
                     };
                     eprintln!(
-                        "ToggleDictation insertion result: ok={} message={}",
+                        "ToggleDictation insertion result: ok={} kind={} message={}",
                         insertion_result.is_ok(),
+                        result_kind,
                         insertion_message
                     );
 
@@ -190,6 +219,7 @@ impl HostInterface {
                         let _ = Self::insertion_result(
                             &ctxt,
                             insertion_result.is_ok(),
+                            &result_kind,
                             &insertion_message,
                         )
                         .await;
@@ -199,14 +229,14 @@ impl HostInterface {
                 }
                 Ok(Err(err)) => {
                     eprintln!("ToggleDictation stop error: {err:#}");
-                    let message = sanitize_error(&err);
+                    let (_, message) = sanitize_error(&err);
                     self.transition_state(STATE_IDLE, &message).await;
                     self.emit_state(STATE_IDLE).await;
                     (false, message)
                 }
                 Err(err) => {
                     eprintln!("ToggleDictation stop task error: {err}");
-                    let message = sanitize_error(&anyhow::Error::new(err));
+                    let (_, message) = sanitize_error(&anyhow::Error::new(err));
                     self.transition_state(STATE_IDLE, &message).await;
                     self.emit_state(STATE_IDLE).await;
                     (false, message)
@@ -229,6 +259,7 @@ impl HostInterface {
     async fn insertion_result(
         ctxt: &SignalContext<'_>,
         ok: bool,
+        result_kind: &str,
         message: &str,
     ) -> zbus::Result<()>;
 }
@@ -238,6 +269,30 @@ impl HostInterface {
         let mut state = self.inner.state.lock().await;
         state.dictation_state = phase.into();
         state.last_status = message.into();
+    }
+
+    async fn transition_state_message(&self, message: &str) {
+        let mut state = self.inner.state.lock().await;
+        state.last_status = message.into();
+    }
+
+    async fn reject_if_repeated_toggle(&self) -> Option<String> {
+        const TOGGLE_DEBOUNCE_MS: u128 = 900;
+
+        let mut state = self.inner.state.lock().await;
+        let now = Instant::now();
+        if let Some(last_toggle_at) = state.last_toggle_at {
+            if now.duration_since(last_toggle_at).as_millis() < TOGGLE_DEBOUNCE_MS {
+                let message =
+                    "Ignoring repeated shortcut activation. Release the shortcut before toggling again."
+                        .to_string();
+                state.last_status = message.clone();
+                return Some(message);
+            }
+        }
+
+        state.last_toggle_at = Some(now);
+        None
     }
 
     async fn signal_context(&self) -> Option<SignalContext<'static>> {
@@ -260,9 +315,9 @@ impl HostInterface {
     }
 }
 
-fn sanitize_error(err: &anyhow::Error) -> String {
+fn sanitize_error(err: &anyhow::Error) -> (String, String) {
     if let Some(dictation_err) = err.downcast_ref::<DictationError>() {
-        return match dictation_err {
+        let message = match dictation_err {
             DictationError::WhisperCliNotFound => {
                 "whisper.cpp is not installed for the host daemon yet.".into()
             }
@@ -272,7 +327,11 @@ fn sanitize_error(err: &anyhow::Error) -> String {
                 "SayWrite could not access a private runtime directory for recordings.".into()
             }
         };
+        return (saywrite::host_api::INSERTION_RESULT_FAILED.into(), message);
     }
 
-    "The host daemon hit an unexpected error.".into()
+    (
+        saywrite::host_api::INSERTION_RESULT_FAILED.into(),
+        "The host daemon hit an unexpected error.".into(),
+    )
 }

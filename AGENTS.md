@@ -42,8 +42,8 @@ SayWrite is a Linux-first dictation app with a Rust GTK4/libadwaita shell and a 
 - `saywrite-host` exists and answers D-Bus calls on `io.github.saywrite.Host`.
 - The app prefers D-Bus for host insertion and falls back to the legacy Unix socket/clipboard path.
 - The host now attempts XDG GlobalShortcuts portal registration at startup and reports status over D-Bus.
-- Host insertion currently prefers command backends such as `wtype`/`xdotool`, then `ibus`, then clipboard tools.
-- IBus is present only as a command-line backend right now, not a first-class input-context integration.
+- Host insertion now exposes explicit capability/result categories: direct typing, clipboard fallback, notification fallback, or unavailable.
+- On GNOME Wayland, host insertion prefers the SayWrite IBus engine bridge; on other setups it falls back to `wtype`, `xdotool`, clipboard tools, or notifications.
 
 ## Current State
 
@@ -54,8 +54,9 @@ SayWrite is a Linux-first dictation app with a Rust GTK4/libadwaita shell and a 
 - `saywrite-host` starts, owns the D-Bus name, and handles `GetStatus`, `InsertText`, and `ToggleDictation`.
 - The host emits D-Bus signals for dictation state, ready text, and insertion results.
 - Global shortcut support is in progress: portal registration is implemented, but desktop support and fallback behavior still matter.
-- Native IBus text commit is still pending; current insertion remains backend/fallback-driven.
+- The SayWrite IBus bridge is implemented and is now the primary GNOME Wayland insertion path.
 - There is now a repo-local host install script for running the companion outside Flatpak.
+- Host-side unit tests now cover IBus parsing and insertion backend classification.
 
 ## Design Principles
 
@@ -75,10 +76,10 @@ SayWrite is a Linux-first dictation app with a Rust GTK4/libadwaita shell and a 
 
 ## Docs
 
-- `docs/architecture.md` — component design and D-Bus boundaries
-- `docs/roadmap.md` — V0 → V4 milestones
-- `docs/implementation_plan.md` — implementation plan and host daemon scope
-- `docs/code_review.md` — current review findings and follow-up notes
-- `docs/security_review.md` — security risks and mitigations
-- `docs/ui_review.md` — UI review notes
-- `docs/ship_todo.md` — pre-ship checklist and gaps
+- `docs/README.md` — which docs are current vs archived
+- `docs/next_steps.md` — active plan and release priorities
+- `docs/holistic_review.md` — current codebase assessment
+- `docs/architecture.md` — historical design rationale and boundaries
+- `docs/roadmap.md` — high-level product stages
+- `docs/implementation_plan.md` — archived earlier planning phase
+- `docs/ship_todo.md` — archived earlier ship checklist

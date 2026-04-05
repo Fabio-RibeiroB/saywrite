@@ -2,7 +2,7 @@ use std::{
     env,
     io::{Read, Write},
     os::unix::net::UnixStream,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::OnceLock,
 };
 
@@ -14,8 +14,15 @@ use crate::host_api;
 #[derive(Debug, Clone)]
 pub enum HostEvent {
     StateChanged(String),
-    TextReady { cleaned: String, raw_text: String },
-    InsertionResult { ok: bool, message: String },
+    TextReady {
+        cleaned: String,
+        raw_text: String,
+    },
+    InsertionResult {
+        ok: bool,
+        result_kind: String,
+        message: String,
+    },
 }
 
 const SOCKET_NAME: &str = "saywrite-host.sock";
@@ -27,6 +34,16 @@ struct HostResponse {
     ok: bool,
     status: Option<String>,
     error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HostSetupStatus {
+    pub binary_installed: bool,
+    pub systemd_service_installed: bool,
+    pub dbus_service_installed: bool,
+    pub host_running: bool,
+    pub install_command: String,
+    pub gnome_shortcut_command: Option<String>,
 }
 
 /// Try to insert text into the focused app. Attempts D-Bus first, then Unix
@@ -75,7 +92,7 @@ pub fn toggle_dictation() -> Result<String> {
 
 /// Check whether the host daemon is reachable via D-Bus or socket.
 pub fn host_available() -> bool {
-    host_dbus_available() || host_socket_present()
+    host_status().is_some() || host_socket_present()
 }
 
 /// Check if the legacy Unix socket exists.
@@ -85,16 +102,18 @@ pub fn host_socket_present() -> bool {
 
 /// Check if the host D-Bus service is available on the session bus.
 pub fn host_dbus_available() -> bool {
-    // Blocking probe: try to call GetStatus with a short timeout.
-    // If the bus name isn't registered, this returns quickly.
+    host_status().is_some()
+}
+
+pub fn host_status() -> Option<host_api::HostStatus> {
     let handle = match tokio_handle() {
         Ok(handle) => handle,
-        Err(_) => return false,
+        Err(_) => return None,
     };
     handle.block_on(async {
         let conn = match zbus::Connection::session().await {
             Ok(c) => c,
-            Err(_) => return false,
+            Err(_) => return None,
         };
         let proxy = match zbus::Proxy::new(
             &conn,
@@ -105,10 +124,128 @@ pub fn host_dbus_available() -> bool {
         .await
         {
             Ok(proxy) => proxy,
-            Err(_) => return false,
+            Err(_) => return None,
         };
-        proxy.call_method("GetStatus", &()).await.is_ok()
+        let reply = proxy.call_method("GetStatus", &()).await.ok()?;
+        let (status, hotkey_active, insertion_available, insertion_capability, insertion_backend): (
+            String,
+            bool,
+            bool,
+            String,
+            String,
+        ) = reply.body().ok()?;
+
+        Some(host_api::HostStatus {
+            status,
+            hotkey_active,
+            insertion_available,
+            insertion_capability,
+            insertion_backend,
+        })
     })
+}
+
+pub fn host_setup_status() -> HostSetupStatus {
+    let binary_path = host_binary_path();
+    let systemd_service_path = host_systemd_service_path();
+    let dbus_service_path = host_dbus_service_path();
+
+    HostSetupStatus {
+        binary_installed: binary_path.exists(),
+        systemd_service_installed: systemd_service_path.exists(),
+        dbus_service_installed: dbus_service_path.exists(),
+        host_running: host_status().is_some(),
+        install_command: host_install_command(),
+        gnome_shortcut_command: gnome_shortcut_command(),
+    }
+}
+
+pub fn host_install_instructions() -> String {
+    let setup = host_setup_status();
+    let mut steps = vec![
+        "Install the host companion:".to_string(),
+        String::new(),
+        format!("1. {}", setup.install_command),
+    ];
+
+    if let Some(command) = setup.gnome_shortcut_command.as_ref() {
+        steps.push(format!("2. Optional GNOME fallback shortcut: {command}"));
+    }
+
+    steps.push(String::new());
+    steps.push("After installation:".into());
+    steps.push("  systemctl --user status saywrite-host".into());
+    steps.push("  journalctl --user -u saywrite-host -f".into());
+    steps.join("\n")
+}
+
+fn host_binary_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("~"))
+        .join(".local/bin/saywrite-host")
+}
+
+fn host_systemd_service_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("~"))
+        .join(".config/systemd/user/saywrite-host.service")
+}
+
+fn host_dbus_service_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("~"))
+        .join(".local/share/dbus-1/services/io.github.saywrite.Host.service")
+}
+
+fn host_install_command() -> String {
+    if let Some(repo_root) = repo_root() {
+        if repo_root.join("scripts/install-host.sh").exists() {
+            return "cargo build --release\n   bash scripts/install-host.sh".into();
+        }
+    }
+
+    "Install the native saywrite-host companion package for your distro.".into()
+}
+
+fn gnome_shortcut_command() -> Option<String> {
+    if !gnome_shortcuts_supported() {
+        return None;
+    }
+
+    if let Some(repo_root) = repo_root() {
+        if repo_root.join("scripts/install-gnome-shortcut.sh").exists() {
+            return Some("bash scripts/install-gnome-shortcut.sh".into());
+        }
+    }
+
+    Some("Create a GNOME custom shortcut that runs the SayWrite host toggle command.".into())
+}
+
+fn repo_root() -> Option<PathBuf> {
+    let current_dir = env::current_dir().ok();
+    let exe_dir = env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf));
+
+    [current_dir, exe_dir]
+        .into_iter()
+        .flatten()
+        .find_map(find_repo_root)
+}
+
+fn find_repo_root(start: PathBuf) -> Option<PathBuf> {
+    for candidate in start.ancestors() {
+        if candidate.join("Cargo.toml").exists() && candidate.join("scripts").is_dir() {
+            return Some(candidate.to_path_buf());
+        }
+    }
+    None
+}
+
+fn gnome_shortcuts_supported() -> bool {
+    env::var("XDG_CURRENT_DESKTOP")
+        .map(|value| value.to_ascii_lowercase().contains("gnome"))
+        .unwrap_or(false)
 }
 
 fn send_text_dbus(text: &str) -> Result<String> {
@@ -132,7 +269,7 @@ fn send_text_dbus(text: &str) -> Result<String> {
             .body()
             .context("unexpected D-Bus reply format")?;
 
-        let (ok, message): (bool, String) = reply;
+        let (ok, _result_kind, message): (bool, String, String) = reply;
 
         if ok {
             Ok(message)
@@ -159,8 +296,12 @@ fn send_text_socket(text: &str, delay_seconds: f64) -> Result<String> {
     })
     .to_string();
 
-    let mut socket = UnixStream::connect(&path)
-        .with_context(|| format!("failed to connect to host integration at {}", path.display()))?;
+    let mut socket = UnixStream::connect(&path).with_context(|| {
+        format!(
+            "failed to connect to host integration at {}",
+            path.display()
+        )
+    })?;
     socket
         .write_all(payload.as_bytes())
         .context("failed to send insertion request")?;
@@ -232,7 +373,11 @@ pub fn subscribe_host_signals() -> Option<std::sync::mpsc::Receiver<HostEvent>> 
                     Ok(h) => h,
                     Err(_) => continue,
                 };
-                let member = header.member().ok().flatten().map(|m| m.as_str().to_string());
+                let member = header
+                    .member()
+                    .ok()
+                    .flatten()
+                    .map(|m| m.as_str().to_string());
                 match member.as_deref() {
                     Some("DictationStateChanged") => {
                         if let Ok(state) = signal.body::<String>() {
@@ -245,8 +390,14 @@ pub fn subscribe_host_signals() -> Option<std::sync::mpsc::Receiver<HostEvent>> 
                         }
                     }
                     Some("InsertionResult") => {
-                        if let Ok((ok, message)) = signal.body::<(bool, String)>() {
-                            let _ = tx.send(HostEvent::InsertionResult { ok, message });
+                        if let Ok((ok, result_kind, message)) =
+                            signal.body::<(bool, String, String)>()
+                        {
+                            let _ = tx.send(HostEvent::InsertionResult {
+                                ok,
+                                result_kind,
+                                message,
+                            });
                         }
                     }
                     _ => {}

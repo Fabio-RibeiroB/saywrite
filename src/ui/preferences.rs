@@ -6,8 +6,7 @@ use gtk::{glib, Align};
 
 use crate::{
     config::{AppSettings, ModelSize, ProviderMode},
-    host_integration,
-    model_installer,
+    host_integration, model_installer,
     runtime::{probe_runtime, RuntimeProbe},
     ui::async_poll,
 };
@@ -46,7 +45,11 @@ fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage
         .subtitle("Choose the default dictation engine")
         .build();
     mode_row.set_model(Some(&gtk::StringList::new(&["Local", "Cloud"])));
-    mode_row.set_selected(if settings.borrow().provider_mode == ProviderMode::Cloud { 1 } else { 0 });
+    mode_row.set_selected(if settings.borrow().provider_mode == ProviderMode::Cloud {
+        1
+    } else {
+        0
+    });
     {
         let settings = settings.clone();
         mode_row.connect_selected_notify(move |row| {
@@ -61,7 +64,9 @@ fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage
     }
     mode_group.add(&mode_row);
 
-    let local_group = adw::PreferencesGroup::builder().title("Local Model").build();
+    let local_group = adw::PreferencesGroup::builder()
+        .title("Local Model")
+        .build();
     let model_row = adw::EntryRow::builder()
         .title("Model file path")
         .text(
@@ -131,11 +136,7 @@ fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage
     progress_bar.set_width_request(180);
     progress_row.add_suffix(&progress_bar);
 
-    let install_btn = gtk::Button::with_label(if installed {
-        "Installed"
-    } else {
-        "Download"
-    });
+    let install_btn = gtk::Button::with_label(if installed { "Installed" } else { "Download" });
     install_btn.set_valign(Align::Center);
     if installed {
         install_btn.set_sensitive(false);
@@ -178,7 +179,9 @@ fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage
                     Ok(_) => {
                         let _ = tx.send(Ok(DownloadState::Done));
                     }
-                    Err(e) => { let _ = tx.send(Err(e.to_string())); }
+                    Err(e) => {
+                        let _ = tx.send(Err(e.to_string()));
+                    }
                 }
             });
 
@@ -220,8 +223,9 @@ fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage
                             btn.set_label("Retry");
                             btn.set_sensitive(true);
                             install_row.set_subtitle("Download failed");
-                            progress_row
-                                .set_subtitle("Download failed. Check your connection and try again.");
+                            progress_row.set_subtitle(
+                                "Download failed. Check your connection and try again.",
+                            );
                             progress_bar.set_fraction(0.0);
                             model_installer::cleanup_partial_for_size(size);
                         }
@@ -310,7 +314,9 @@ fn build_shortcut_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPa
 
     let note_row = adw::ActionRow::builder()
         .title("How it works")
-        .subtitle("SayWrite listens for this shortcut system-wide and starts recording immediately.")
+        .subtitle(
+            "SayWrite listens for this shortcut system-wide and starts recording immediately.",
+        )
         .build();
     note_row.set_activatable(false);
 
@@ -326,24 +332,77 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
         .icon_name("utilities-system-monitor-symbolic")
         .build();
     let probe = probe_runtime(&settings.borrow());
+    let host_status = host_integration::host_status();
+    let host_setup = host_integration::host_setup_status();
 
     page.add(&build_probe_group("Runtime", &probe));
 
     let note_group = adw::PreferencesGroup::builder().title("Status").build();
     let row = adw::ActionRow::builder()
         .title("Host companion")
-        .subtitle(if host_integration::host_available() {
-            "Connected — hotkey dictation and direct typing into focused apps are available."
-        } else {
-            "Not running — global hotkey dictation is unavailable until the host companion is installed."
-        })
+        .subtitle(
+            host_status
+                .as_ref()
+                .map(|status| status.status.as_str())
+                .unwrap_or(
+                    "Not running — global hotkey dictation is unavailable until the host companion is installed.",
+                ),
+        )
         .build();
     note_group.add(&row);
 
-    if !host_integration::host_available() {
+    let install_state_row = adw::ActionRow::builder()
+        .title("Host installation")
+        .subtitle(
+            match (
+                host_setup.binary_installed,
+                host_setup.systemd_service_installed,
+                host_setup.dbus_service_installed,
+            ) {
+                (true, true, true) => "Installed in your user account",
+                (true, _, _) => "Partially installed — service files are incomplete",
+                _ => "Not installed yet",
+            },
+        )
+        .build();
+    note_group.add(&install_state_row);
+
+    let running_state_row = adw::ActionRow::builder()
+        .title("Host daemon")
+        .subtitle(if host_setup.host_running {
+            "Running now"
+        } else if host_setup.binary_installed {
+            "Installed, but not reachable from the app"
+        } else {
+            "Not running"
+        })
+        .build();
+    note_group.add(&running_state_row);
+
+    if let Some(status) = host_status.as_ref() {
+        let insertion_row = adw::ActionRow::builder()
+            .title("Insertion mode")
+            .subtitle(format!(
+                "{} via {}",
+                crate::host_api::insertion_capability_label(&status.insertion_capability),
+                status.insertion_backend
+            ))
+            .build();
+        note_group.add(&insertion_row);
+
+        let shortcut_row = adw::ActionRow::builder()
+            .title("Global shortcut")
+            .subtitle(if status.hotkey_active {
+                "Active"
+            } else {
+                "Configured, but not active yet"
+            })
+            .build();
+        note_group.add(&shortcut_row);
+    } else {
         let install_row = adw::ActionRow::builder()
             .title("Install host companion")
-            .subtitle("Enables direct text typing into any focused app")
+            .subtitle("Enables hotkey dictation and host-side text delivery")
             .build();
         let install_info_btn = gtk::Button::with_label("How to install");
         install_info_btn.set_valign(Align::Center);
@@ -353,7 +412,7 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
             let dialog = adw::MessageDialog::new(
                 parent_window.as_ref(),
                 Some("Install Host Companion"),
-                Some("Build and install the host daemon:\n\n1. cargo build --release\n2. bash scripts/install-host.sh\n\nThis installs saywrite-host to ~/.local/bin and enables the systemd user service."),
+                Some(&host_integration::host_install_instructions()),
             );
             dialog.add_response("ok", "OK");
             dialog.present();
@@ -373,11 +432,28 @@ fn build_probe_group(title: &str, probe: &RuntimeProbe) -> adw::PreferencesGroup
         ("Provider", probe.provider_label.clone()),
         ("Dictation", probe.dictation_label.clone()),
         ("Acceleration", probe.acceleration_label.clone()),
-        ("whisper.cpp", if probe.whisper_cli_found { format!("Found at {}", probe.whisper_cli_display) } else { "Not found yet".into() }),
-        ("Model", if probe.local_model_present { probe.local_model_display.clone() } else { "No local model downloaded yet".into() }),
+        (
+            "whisper.cpp",
+            if probe.whisper_cli_found {
+                format!("Found at {}", probe.whisper_cli_display)
+            } else {
+                "Not found yet".into()
+            },
+        ),
+        (
+            "Model",
+            if probe.local_model_present {
+                probe.local_model_display.clone()
+            } else {
+                "No local model downloaded yet".into()
+            },
+        ),
         ("Insertion", probe.insertion_label.clone()),
     ] {
-        let row = adw::ActionRow::builder().title(label).subtitle(&value).build();
+        let row = adw::ActionRow::builder()
+            .title(label)
+            .subtitle(&value)
+            .build();
         group.add(&row);
     }
 
@@ -406,6 +482,9 @@ fn schedule_settings_save(
 }
 
 enum DownloadState {
-    Progress { fraction: Option<f64>, label: String },
+    Progress {
+        fraction: Option<f64>,
+        label: String,
+    },
     Done,
 }

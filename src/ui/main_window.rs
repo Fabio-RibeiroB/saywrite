@@ -1,20 +1,14 @@
 use libadwaita as adw;
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    sync::mpsc,
-    thread,
-    time::Duration,
-};
+use std::{cell::RefCell, rc::Rc, sync::mpsc, thread, time::Duration};
 
 use adw::prelude::*;
 use gtk::{gdk, glib, Align, Orientation};
 
 use crate::{
     config::AppSettings,
+    host_api,
     host_integration::{self, HostEvent},
-    model_installer,
-    runtime,
+    model_installer, runtime,
     ui::async_poll,
     ui::preferences,
 };
@@ -97,7 +91,8 @@ impl MainWindowUi {
         *self.is_listening.borrow_mut() = false;
         self.spinner.stop();
         self.spinner_row.set_visible(false);
-        self.state_label.set_label("The host companion disconnected.");
+        self.state_label
+            .set_label("The host companion disconnected.");
         self.dictate_btn.remove_css_class("destructive-action");
         self.dictate_btn.add_css_class("suggested-action");
         self.dictate_btn.set_label("  Start Dictation  ");
@@ -119,8 +114,7 @@ impl MainWindowUi {
             "processing" => {
                 self.spinner_row.set_visible(true);
                 self.spinner.start();
-                self.state_label
-                    .set_label("Processing your transcript…");
+                self.state_label.set_label("Processing your transcript…");
                 self.dictate_btn.set_sensitive(false);
             }
             "done" | "idle" => {
@@ -131,15 +125,22 @@ impl MainWindowUi {
                 self.dictate_btn.add_css_class("suggested-action");
                 self.dictate_btn.set_label("  Start Dictation  ");
                 self.dictate_btn.set_sensitive(true);
-                self.state_label
-                    .set_label(if state == "done" { "Transcript ready" } else { "Ready" });
+                self.state_label.set_label(if state == "done" {
+                    "Transcript ready"
+                } else {
+                    "Ready"
+                });
             }
             _ => {}
         }
     }
 
     fn show_transcript(&self, cleaned: &str, raw_text: &str) {
-        let final_text = if cleaned.is_empty() { raw_text } else { cleaned };
+        let final_text = if cleaned.is_empty() {
+            raw_text
+        } else {
+            cleaned
+        };
         let display = if final_text.is_empty() {
             "Nothing captured."
         } else {
@@ -154,9 +155,13 @@ impl MainWindowUi {
         self.action_row.set_visible(has_text);
     }
 
-    fn apply_insertion_result(&self, ok: bool, message: &str) {
+    fn apply_insertion_result(&self, ok: bool, result_kind: &str, message: &str) {
         if ok {
-            self.state_label.set_label(message);
+            self.state_label.set_label(&format!(
+                "{}: {}",
+                host_api::insertion_result_label(result_kind),
+                message
+            ));
         } else {
             self.state_label
                 .set_label(&format!("Insertion failed: {message}"));
@@ -244,10 +249,7 @@ fn build_header(
     header
 }
 
-fn build_body(
-    window: &adw::ApplicationWindow,
-    settings: Rc<RefCell<AppSettings>>,
-) -> gtk::Widget {
+fn build_body(window: &adw::ApplicationWindow, settings: Rc<RefCell<AppSettings>>) -> gtk::Widget {
     let outer = gtk::Box::new(Orientation::Vertical, 0);
     outer.set_valign(Align::Center);
     outer.set_vexpand(true);
@@ -329,7 +331,18 @@ fn build_body(
 
     let type_btn = gtk::Button::with_label("Type into App");
     type_btn.add_css_class("pill");
-    type_btn.set_visible(host_integration::host_available());
+    let host_status = host_integration::host_status();
+    if let Some(status) = host_status.as_ref() {
+        type_btn.set_visible(true);
+        type_btn.set_label(match status.insertion_capability.as_str() {
+            host_api::INSERTION_CAPABILITY_TYPING => "Type into App",
+            host_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY => "Copy for App",
+            host_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY => "Show Result",
+            _ => "Send to App",
+        });
+    } else {
+        type_btn.set_visible(false);
+    }
 
     let action_row = gtk::Box::new(Orientation::Horizontal, 16);
     action_row.set_halign(Align::Center);
@@ -365,27 +378,51 @@ fn build_body(
 
     // Check readiness and gate the button
     {
-        let host_ready = host_integration::host_dbus_available();
+        let host_ready = host_status.is_some();
+        let host_setup = host_integration::host_setup_status();
         let probe = runtime::probe_runtime(&settings.borrow());
+        let mut blocking_setup_issue = false;
         if !host_ready {
+            blocking_setup_issue = true;
             ui.set_setup_state(
                 "Complete setup to start dictation",
                 "Host companion required",
-                "Install and run the host companion to use global shortcut dictation and type text into other apps.",
+                if host_setup.binary_installed {
+                    "The host companion looks installed, but the app cannot reach it yet. Open Settings to see the install and status steps."
+                } else {
+                    "Install and run the host companion to use global shortcut dictation and type text into other apps."
+                },
             );
         } else if settings.borrow().provider_mode == crate::config::ProviderMode::Local {
             if !probe.whisper_cli_found {
+                blocking_setup_issue = true;
                 ui.set_setup_state(
                     "Local dictation is not ready yet",
                     "whisper.cpp not found",
                     "Open Settings to check diagnostics and finish the local runtime setup.",
                 );
             } else if !probe.local_model_present && !model_installer::model_exists() {
+                blocking_setup_issue = true;
                 ui.set_setup_state(
                     "Local dictation is not ready yet",
                     "Download a local model",
                     "Open Settings and install a whisper.cpp model before starting local dictation.",
                 );
+            }
+        }
+        if !blocking_setup_issue {
+            if let Some(status) = host_status.as_ref() {
+                if !host_api::supports_direct_typing(&status.insertion_capability) {
+                    ui.set_setup_state(
+                        "Host companion is running",
+                        "Direct typing is not active on this desktop",
+                        &format!(
+                            "SayWrite is currently using {} via {}. Dictation still works, but the result will be delivered as a fallback instead of direct typing.",
+                            host_api::insertion_capability_label(&status.insertion_capability),
+                            status.insertion_backend
+                        ),
+                    );
+                }
             }
         }
     }
@@ -449,9 +486,11 @@ fn build_body(
                         HostEvent::TextReady { cleaned, raw_text } => {
                             ui.show_transcript(&cleaned, &raw_text)
                         }
-                        HostEvent::InsertionResult { ok, message } => {
-                            ui.apply_insertion_result(ok, &message)
-                        }
+                        HostEvent::InsertionResult {
+                            ok,
+                            result_kind,
+                            message,
+                        } => ui.apply_insertion_result(ok, &result_kind, &message),
                     }
                 }
                 glib::ControlFlow::Continue
@@ -472,7 +511,8 @@ fn build_body(
             let (tx, rx) = mpsc::channel::<Result<String, String>>();
             let text_for_send = text.clone();
             thread::spawn(move || {
-                let result = host_integration::send_text(&text_for_send, 0.0).map_err(|e| e.to_string());
+                let result =
+                    host_integration::send_text(&text_for_send, 0.0).map_err(|e| e.to_string());
                 let _ = tx.send(result);
             });
 
@@ -506,40 +546,38 @@ fn build_body(
         let dictate_btn = dictate_btn.clone();
         let ui = ui.clone();
         let transcript_bubble = transcript_bubble.clone();
-        key_controller.connect_key_pressed(move |_, keyval, _, modifier| {
-            match keyval {
-                gdk::Key::Return | gdk::Key::KP_Enter => {
+        key_controller.connect_key_pressed(move |_, keyval, _, modifier| match keyval {
+            gdk::Key::Return | gdk::Key::KP_Enter => {
+                if dictate_btn.is_sensitive() {
+                    dictate_btn.emit_clicked();
+                }
+                glib::Propagation::Stop
+            }
+            gdk::Key::Escape => {
+                if *ui.is_listening.borrow() {
                     if dictate_btn.is_sensitive() {
                         dictate_btn.emit_clicked();
                     }
-                    glib::Propagation::Stop
+                } else if transcript_bubble.is_visible() {
+                    transcript_bubble.set_visible(false);
+                    ui.state_label.set_label("Ready");
                 }
-                gdk::Key::Escape => {
-                    if *ui.is_listening.borrow() {
-                        if dictate_btn.is_sensitive() {
-                            dictate_btn.emit_clicked();
-                        }
-                    } else if transcript_bubble.is_visible() {
-                        transcript_bubble.set_visible(false);
-                        ui.state_label.set_label("Ready");
-                    }
-                    glib::Propagation::Stop
-                }
-                gdk::Key::c if modifier.contains(gdk::ModifierType::CONTROL_MASK) => {
-                    if !*ui.is_listening.borrow() && transcript_bubble.is_visible() {
-                        let text = ui.last_cleaned.borrow().clone();
-                        if !text.is_empty() {
-                            if let Some(display) = gdk::Display::default() {
-                                display.clipboard().set_text(&text);
-                                ui.state_label.set_label("Copied to clipboard");
-                            }
-                        }
-                        return glib::Propagation::Stop;
-                    }
-                    glib::Propagation::Proceed
-                }
-                _ => glib::Propagation::Proceed,
+                glib::Propagation::Stop
             }
+            gdk::Key::c if modifier.contains(gdk::ModifierType::CONTROL_MASK) => {
+                if !*ui.is_listening.borrow() && transcript_bubble.is_visible() {
+                    let text = ui.last_cleaned.borrow().clone();
+                    if !text.is_empty() {
+                        if let Some(display) = gdk::Display::default() {
+                            display.clipboard().set_text(&text);
+                            ui.state_label.set_label("Copied to clipboard");
+                        }
+                    }
+                    return glib::Propagation::Stop;
+                }
+                glib::Propagation::Proceed
+            }
+            _ => glib::Propagation::Proceed,
         });
         window.add_controller(key_controller);
     }

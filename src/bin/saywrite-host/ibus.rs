@@ -13,8 +13,9 @@ use tokio::{
     time::timeout,
 };
 use zbus::{
-    dbus_interface, fdo, Connection, ConnectionBuilder, Proxy, SignalContext,
+    dbus_interface, fdo,
     zvariant::{OwnedObjectPath, OwnedValue, Structure, StructureBuilder},
+    Connection, ConnectionBuilder, Proxy, SignalContext,
 };
 
 const COMPONENT_NAME: &str = "io.github.saywrite.IBus";
@@ -83,7 +84,12 @@ pub async fn ensure_bridge() -> Result<()> {
         .name(COMPONENT_NAME)?
         .serve_at(FACTORY_PATH, IbusFactory)?
         .serve_at(FACTORY_PATH, IbusService)?
-        .serve_at(ENGINE_PATH, IbusEngine { inner: inner.clone() })?
+        .serve_at(
+            ENGINE_PATH,
+            IbusEngine {
+                inner: inner.clone(),
+            },
+        )?
         .serve_at(ENGINE_PATH, IbusService)?
         .build()
         .await
@@ -125,7 +131,9 @@ pub fn ensure_running() -> Result<()> {
         thread::sleep(Duration::from_millis(150));
     }
 
-    Err(anyhow!("ibus-daemon did not expose an address after startup"))
+    Err(anyhow!(
+        "ibus-daemon did not expose an address after startup"
+    ))
 }
 
 pub fn address() -> Result<String> {
@@ -201,10 +209,16 @@ pub fn global_engine_name() -> Result<String> {
 
 impl IbusBridge {
     async fn commit_text(&self, text: &str) -> Result<String> {
+        current_input_context().context("no focused IBus input context is available")?;
         let previous_engine = global_engine_name().unwrap_or_else(|_| "xkb:us::eng".into());
         let (tx, rx) = oneshot::channel();
         {
             let mut pending = self.inner.pending_commit.lock().await;
+            if pending.is_some() {
+                return Err(anyhow!(
+                    "SayWrite is already committing text through the IBus bridge"
+                ));
+            }
             *pending = Some(PendingCommit {
                 text: text.to_string(),
                 previous_engine: previous_engine.clone(),
@@ -225,13 +239,47 @@ impl IbusBridge {
         proxy
             .call_method("SetGlobalEngine", &(ENGINE_NAME,))
             .await
-            .context("failed to activate the SayWrite IBus engine")?;
+            .context("failed to activate the SayWrite IBus engine")
+            .inspect_err(|_| {
+                self.clear_pending_commit();
+            })?;
 
         match timeout(Duration::from_secs(3), rx).await {
             Ok(Ok(Ok(message))) => Ok(message),
-            Ok(Ok(Err(message))) => Err(anyhow!(message)),
-            Ok(Err(_)) => Err(anyhow!("SayWrite IBus engine dropped the pending commit")),
-            Err(_) => Err(anyhow!("Timed out waiting for the SayWrite IBus engine to commit text")),
+            Ok(Ok(Err(message))) => {
+                self.restore_after_failed_commit(&previous_engine).await;
+                Err(anyhow!(message))
+            }
+            Ok(Err(_)) => {
+                self.restore_after_failed_commit(&previous_engine).await;
+                Err(anyhow!("SayWrite IBus engine dropped the pending commit"))
+            }
+            Err(_) => {
+                self.restore_after_failed_commit(&previous_engine).await;
+                Err(anyhow!(
+                    "Timed out waiting for the SayWrite IBus engine to commit text"
+                ))
+            }
+        }
+    }
+
+    fn clear_pending_commit(&self) {
+        let inner = self.inner.clone();
+        tokio::spawn(async move {
+            let mut pending = inner.pending_commit.lock().await;
+            pending.take();
+        });
+    }
+
+    async fn restore_after_failed_commit(&self, previous_engine: &str) {
+        {
+            let mut pending = self.inner.pending_commit.lock().await;
+            pending.take();
+        }
+
+        let connection = self.inner.connection.lock().await.clone();
+        if let Some(connection) = connection {
+            let _ = restore_previous_engine(&connection, previous_engine).await;
         }
     }
 }
@@ -277,10 +325,7 @@ impl IbusEngine {
 
     async fn candidate_clicked(&self, _index: u32, _button: u32, _state: u32) {}
 
-    async fn focus_in(
-        &self,
-        #[zbus(signal_context)] ctxt: SignalContext<'_>,
-    ) -> fdo::Result<()> {
+    async fn focus_in(&self, #[zbus(signal_context)] ctxt: SignalContext<'_>) -> fdo::Result<()> {
         self.flush_pending_commit(&ctxt).await
     }
 
@@ -299,10 +344,7 @@ impl IbusEngine {
 
     async fn reset(&self) {}
 
-    async fn enable(
-        &self,
-        #[zbus(signal_context)] ctxt: SignalContext<'_>,
-    ) -> fdo::Result<()> {
+    async fn enable(&self, #[zbus(signal_context)] ctxt: SignalContext<'_>) -> fdo::Result<()> {
         self.flush_pending_commit(&ctxt).await
     }
 
@@ -338,17 +380,15 @@ impl IbusEngine {
         };
 
         let serialized = serialize_text(&pending.text);
-        Self::commit_text(ctxt, serialized)
-            .await
-            .map_err(|err| fdo::Error::Failed(format!("failed to emit SayWrite CommitText: {err}")))?;
+        Self::commit_text(ctxt, serialized).await.map_err(|err| {
+            fdo::Error::Failed(format!("failed to emit SayWrite CommitText: {err}"))
+        })?;
 
         if let Some(connection) = self.inner.connection.lock().await.clone() {
             let previous_engine = pending.previous_engine.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_millis(120)).await;
-                if let Ok(proxy) = Proxy::new(&connection, IBUS_DEST, IBUS_PATH, IBUS_IFACE).await {
-                    let _ = proxy.call_method("SetGlobalEngine", &(previous_engine.as_str(),)).await;
-                }
+                let _ = restore_previous_engine(&connection, &previous_engine).await;
             });
         }
 
@@ -367,6 +407,19 @@ async fn register_component(connection: &Connection) -> Result<()> {
         .call_method("RegisterComponent", &(serialize_component(),))
         .await
         .context("failed to register the SayWrite IBus component")?;
+    Ok(())
+}
+
+async fn restore_previous_engine(connection: &Connection, previous_engine: &str) -> Result<()> {
+    let proxy = Proxy::new(connection, IBUS_DEST, IBUS_PATH, IBUS_IFACE)
+        .await
+        .context("failed to create an IBus proxy for engine restore")?;
+    proxy
+        .call_method("SetGlobalEngine", &(previous_engine,))
+        .await
+        .with_context(|| {
+            format!("failed to restore the previous IBus engine: {previous_engine}")
+        })?;
     Ok(())
 }
 
@@ -456,4 +509,30 @@ fn parse_engine_name(text: &str) -> Option<String> {
     let rest = &rest[quote + 1..];
     let end = rest.find('\'')?;
     Some(rest[..end].to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_engine_name, parse_object_path};
+
+    #[test]
+    fn parses_object_path_from_gdbus_output() {
+        let output = "(objectpath '/org/freedesktop/IBus/InputContext_2',)";
+        assert_eq!(
+            parse_object_path(output).as_deref(),
+            Some("/org/freedesktop/IBus/InputContext_2")
+        );
+    }
+
+    #[test]
+    fn parses_engine_name_from_gdbus_output() {
+        let output = "(<'IBusEngineDesc', {}, 'xkb:us::eng', 'English (US)', '', 'en', '', '', '', uint32 0, '', '', '', '', '', '', '', ''>,)";
+        assert_eq!(parse_engine_name(output).as_deref(), Some("xkb:us::eng"));
+    }
+
+    #[test]
+    fn returns_none_for_unexpected_gdbus_output() {
+        assert_eq!(parse_object_path("()"), None);
+        assert_eq!(parse_engine_name("()"), None);
+    }
 }

@@ -1,6 +1,5 @@
 use std::{
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     process::{Child, Command},
     sync::{Mutex, OnceLock},
@@ -109,7 +108,9 @@ pub fn start_live(settings: &AppSettings) -> Result<String> {
         }
     }
 
-    let mut guard = session_store().lock().expect("recording session mutex poisoned");
+    let mut guard = session_store()
+        .lock()
+        .expect("recording session mutex poisoned");
     if guard.is_some() {
         return Err(anyhow!("A dictation session is already running."));
     }
@@ -190,16 +191,21 @@ fn session_store() -> &'static Mutex<Option<RecordingSession>> {
 
 fn transcribe_cloud(settings: &AppSettings, audio_path: &Path) -> Result<String> {
     if settings.cloud_api_key.is_empty() {
-        return Err(anyhow!("Cloud API key is not set. Configure it in Settings."));
+        return Err(anyhow!(
+            "Cloud API key is not set. Configure it in Settings."
+        ));
     }
 
     let audio_data = fs::read(audio_path)
         .with_context(|| format!("failed to read audio at {}", audio_path.display()))?;
 
-    let boundary = format!("----SayWrite{}", SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis());
+    let boundary = format!(
+        "----SayWrite{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    );
 
     let mut body = Vec::new();
     // file field
@@ -207,21 +213,39 @@ fn transcribe_cloud(settings: &AppSettings, audio_path: &Path) -> Result<String>
     body.extend_from_slice(&audio_data);
     body.extend_from_slice(b"\r\n");
     // model field
-    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-1\r\n").as_bytes());
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-1\r\n"
+        )
+        .as_bytes(),
+    );
     // language field
-    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\nen\r\n").as_bytes());
+    body.extend_from_slice(
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\nen\r\n")
+            .as_bytes(),
+    );
     // closing boundary
     body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
 
-    let url = format!("{}/audio/transcriptions", settings.cloud_api_base.trim_end_matches('/'));
+    let url = format!(
+        "{}/audio/transcriptions",
+        settings.cloud_api_base.trim_end_matches('/')
+    );
 
     let response = ureq::post(&url)
-        .set("Authorization", &format!("Bearer {}", settings.cloud_api_key))
-        .set("Content-Type", &format!("multipart/form-data; boundary={boundary}"))
+        .set(
+            "Authorization",
+            &format!("Bearer {}", settings.cloud_api_key),
+        )
+        .set(
+            "Content-Type",
+            &format!("multipart/form-data; boundary={boundary}"),
+        )
         .send_bytes(&body)
         .map_err(|e| anyhow!("Cloud transcription request failed: {e}"))?;
 
-    let response_text = response.into_string()
+    let response_text = response
+        .into_string()
         .context("failed to read cloud transcription response")?;
     let json: serde_json::Value = serde_json::from_str(&response_text)
         .context("failed to parse cloud transcription response")?;
@@ -300,9 +324,7 @@ fn transcribe_file(model_path: &Path, whisper_cli: &Path, audio_path: &Path) -> 
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!(
-            stderr.trim().to_string()
-        ));
+        return Err(anyhow!(stderr.trim().to_string()));
     }
 
     Ok(extract_transcript(&String::from_utf8_lossy(&output.stdout)))

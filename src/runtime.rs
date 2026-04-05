@@ -1,12 +1,8 @@
-use std::{
-    env,
-    path::Path,
-};
+use std::{env, path::Path};
 
 use crate::{
     config::{preferred_model_path, AppSettings, ProviderMode},
-    dictation,
-    host_integration,
+    dictation, host_integration,
 };
 
 #[derive(Debug, Clone)]
@@ -35,15 +31,18 @@ pub fn probe_runtime(settings: &AppSettings) -> RuntimeProbe {
         whisper_cli_found: whisper_cli.exists(),
         whisper_cli_display: shorten_path(&whisper_cli),
         acceleration_label: detect_acceleration(),
-        insertion_label: if host_integration::host_available() {
-            "Host integration online".into()
-        } else {
-            "Clipboard fallback until host integration is running".into()
+        insertion_label: match host_integration::host_status() {
+            Some(status) => format!(
+                "{} via {}",
+                crate::host_api::insertion_capability_label(&status.insertion_capability),
+                status.insertion_backend
+            ),
+            None => "Clipboard fallback until host integration is running".into(),
         },
-        dictation_label: if host_integration::host_dbus_available() {
-            "Host daemon ready for hotkey dictation".into()
-        } else {
-            "Install host companion for global hotkey dictation".into()
+        dictation_label: match host_integration::host_status() {
+            Some(status) if status.hotkey_active => "Host daemon ready for hotkey dictation".into(),
+            Some(_) => "Host daemon running, but the global shortcut is not active yet".into(),
+            None => "Install host companion for global hotkey dictation".into(),
         },
         provider_label,
     }

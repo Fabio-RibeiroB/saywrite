@@ -130,7 +130,11 @@ impl AppSettings {
         if parsed.local_model_path.is_none() && default_model.exists() {
             parsed.local_model_path = Some(default_model);
         }
-        if parsed.global_shortcut_label.trim().eq_ignore_ascii_case(LEGACY_SHORTCUT) {
+        if parsed
+            .global_shortcut_label
+            .trim()
+            .eq_ignore_ascii_case(LEGACY_SHORTCUT)
+        {
             parsed.global_shortcut_label = default_shortcut();
             let _ = parsed.save();
         }
@@ -149,8 +153,7 @@ impl AppSettings {
         }
 
         let payload = serde_json::to_string_pretty(self)?;
-        fs::write(&path, payload)
-            .with_context(|| format!("failed to write {}", path.display()))?;
+        fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
         set_private_permissions(&path)
             .with_context(|| format!("failed to lock down {}", path.display()))?;
         Ok(())
@@ -168,8 +171,7 @@ pub fn config_dir() -> PathBuf {
 }
 
 pub fn data_dir() -> PathBuf {
-    let mut base = dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from(Path::new(".local/share")));
+    let mut base = dirs::data_dir().unwrap_or_else(|| PathBuf::from(Path::new(".local/share")));
     base.push(APP_DIR_NAME);
     base
 }

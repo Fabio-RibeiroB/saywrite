@@ -1,16 +1,24 @@
 use std::{env, process::Command};
 
 use anyhow::{anyhow, Context, Result};
+use saywrite::host_api;
 
 use crate::ibus;
 
 #[derive(Debug, Clone)]
 pub struct InsertionStatus {
     pub available: bool,
+    pub capability: String,
     pub method: String,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
+pub struct InsertionOutcome {
+    pub result_kind: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Backend {
     IbusEngine,
     Wtype,
@@ -24,14 +32,14 @@ enum Backend {
 
 pub fn probe() -> InsertionStatus {
     let backend = detect_backend();
-    let method = describe_method(backend);
     InsertionStatus {
         available: !matches!(backend, Backend::Unavailable),
-        method,
+        capability: capability_for_backend(backend).into(),
+        method: describe_method(backend),
     }
 }
 
-pub async fn insert_text(text: &str) -> Result<String> {
+pub async fn insert_text(text: &str) -> Result<InsertionOutcome> {
     if text.trim().is_empty() {
         return Err(anyhow!("No text was provided for insertion."));
     }
@@ -53,6 +61,28 @@ pub async fn insert_text(text: &str) -> Result<String> {
             "All insertion backends failed: {}",
             failures.join(" | ")
         ))
+    }
+}
+
+fn capability_for_backend(backend: Backend) -> &'static str {
+    match backend {
+        Backend::IbusEngine | Backend::Wtype | Backend::Xdotool => {
+            host_api::INSERTION_CAPABILITY_TYPING
+        }
+        Backend::WlClipboard | Backend::Xclip | Backend::Xsel => {
+            host_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY
+        }
+        Backend::NotifySend => host_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY,
+        Backend::Unavailable => host_api::INSERTION_CAPABILITY_UNAVAILABLE,
+    }
+}
+
+fn result_kind_for_backend(backend: Backend) -> &'static str {
+    match backend {
+        Backend::IbusEngine | Backend::Wtype | Backend::Xdotool => host_api::INSERTION_RESULT_TYPED,
+        Backend::WlClipboard | Backend::Xclip | Backend::Xsel => host_api::INSERTION_RESULT_COPIED,
+        Backend::NotifySend => host_api::INSERTION_RESULT_NOTIFIED,
+        Backend::Unavailable => host_api::INSERTION_RESULT_FAILED,
     }
 }
 
@@ -110,30 +140,68 @@ fn command_exists(command: &str) -> bool {
 
 fn candidate_backends() -> Vec<Backend> {
     let session = env::var("XDG_SESSION_TYPE").unwrap_or_default();
+    let mut available = Vec::new();
+
+    if ibus::bridge_ready() {
+        available.push(Backend::IbusEngine);
+    }
+    if command_exists("wtype") {
+        available.push(Backend::Wtype);
+    }
+    if command_exists("xdotool") {
+        available.push(Backend::Xdotool);
+    }
+    if command_exists("wl-copy") {
+        available.push(Backend::WlClipboard);
+    }
+    if command_exists("xclip") {
+        available.push(Backend::Xclip);
+    }
+    if command_exists("xsel") {
+        available.push(Backend::Xsel);
+    }
+    if command_exists("notify-send") {
+        available.push(Backend::NotifySend);
+    }
+
+    candidate_backends_for(
+        &session,
+        ibus::gnome_wayland(),
+        ibus::bridge_ready(),
+        &available,
+    )
+}
+
+fn candidate_backends_for(
+    session: &str,
+    gnome_wayland: bool,
+    bridge_ready: bool,
+    available: &[Backend],
+) -> Vec<Backend> {
     let mut backends = Vec::new();
 
-    if ibus::bridge_ready() && ibus::gnome_wayland() {
+    if bridge_ready && gnome_wayland && available.contains(&Backend::IbusEngine) {
         backends.push(Backend::IbusEngine);
     }
     if session.eq_ignore_ascii_case("wayland")
-        && command_exists("wtype")
-        && !ibus::gnome_wayland()
+        && !gnome_wayland
+        && available.contains(&Backend::Wtype)
     {
         backends.push(Backend::Wtype);
     }
-    if session.eq_ignore_ascii_case("x11") && command_exists("xdotool") {
+    if session.eq_ignore_ascii_case("x11") && available.contains(&Backend::Xdotool) {
         backends.push(Backend::Xdotool);
     }
-    if command_exists("wl-copy") {
+    if available.contains(&Backend::WlClipboard) {
         backends.push(Backend::WlClipboard);
     }
-    if command_exists("xclip") {
+    if available.contains(&Backend::Xclip) {
         backends.push(Backend::Xclip);
     }
-    if command_exists("xsel") {
+    if available.contains(&Backend::Xsel) {
         backends.push(Backend::Xsel);
     }
-    if command_exists("notify-send") {
+    if available.contains(&Backend::NotifySend) {
         backends.push(Backend::NotifySend);
     }
 
@@ -144,39 +212,69 @@ fn candidate_backends() -> Vec<Backend> {
     backends
 }
 
-async fn try_backend(backend: Backend, text: &str) -> Result<String> {
+async fn try_backend(backend: Backend, text: &str) -> Result<InsertionOutcome> {
     match backend {
         Backend::IbusEngine => {
             ibus::commit_text(text).await?;
-            Ok("Text committed through the SayWrite IBus engine.".into())
+            Ok(InsertionOutcome {
+                result_kind: result_kind_for_backend(backend).into(),
+                message: "Text committed through the SayWrite IBus engine.".into(),
+            })
         }
         Backend::Wtype => {
             run_command("wtype", &[text]).context("Wayland text typing failed")?;
-            Ok("Text typed with wtype.".into())
+            Ok(InsertionOutcome {
+                result_kind: result_kind_for_backend(backend).into(),
+                message: "Text typed with wtype.".into(),
+            })
         }
         Backend::Xdotool => {
-            run_command("xdotool", &["type", "--clearmodifiers", "--delay", "1", text])
-                .context("X11 text typing failed")?;
-            Ok("Text typed with xdotool.".into())
+            run_command(
+                "xdotool",
+                &["type", "--clearmodifiers", "--delay", "1", text],
+            )
+            .context("X11 text typing failed")?;
+            Ok(InsertionOutcome {
+                result_kind: result_kind_for_backend(backend).into(),
+                message: "Text typed with xdotool.".into(),
+            })
         }
         Backend::WlClipboard => {
             write_clipboard("wl-copy", &[], text)?;
-            notify_transcript("Transcript copied to the clipboard. Paste it into the focused field.")?;
-            Ok("Transcript copied to the Wayland clipboard.".into())
+            notify_transcript(
+                "Transcript copied to the clipboard. Paste it into the focused field.",
+            )?;
+            Ok(InsertionOutcome {
+                result_kind: result_kind_for_backend(backend).into(),
+                message: "Transcript copied to the Wayland clipboard.".into(),
+            })
         }
         Backend::Xclip => {
             write_clipboard("xclip", &["-selection", "clipboard"], text)?;
-            notify_transcript("Transcript copied to the clipboard. Paste it into the focused field.")?;
-            Ok("Transcript copied to the X11 clipboard.".into())
+            notify_transcript(
+                "Transcript copied to the clipboard. Paste it into the focused field.",
+            )?;
+            Ok(InsertionOutcome {
+                result_kind: result_kind_for_backend(backend).into(),
+                message: "Transcript copied to the X11 clipboard.".into(),
+            })
         }
         Backend::Xsel => {
             write_clipboard("xsel", &["--clipboard", "--input"], text)?;
-            notify_transcript("Transcript copied to the clipboard. Paste it into the focused field.")?;
-            Ok("Transcript copied to the clipboard with xsel.".into())
+            notify_transcript(
+                "Transcript copied to the clipboard. Paste it into the focused field.",
+            )?;
+            Ok(InsertionOutcome {
+                result_kind: result_kind_for_backend(backend).into(),
+                message: "Transcript copied to the clipboard with xsel.".into(),
+            })
         }
         Backend::NotifySend => {
             notify_transcript(text)?;
-            Ok("Transcript shown as a desktop notification.".into())
+            Ok(InsertionOutcome {
+                result_kind: result_kind_for_backend(backend).into(),
+                message: "Transcript shown as a desktop notification.".into(),
+            })
         }
         Backend::Unavailable => Err(anyhow!("no insertion backend is available")),
     }
@@ -234,4 +332,69 @@ fn notify_transcript(text: &str) -> Result<()> {
         ],
     )
     .context("desktop notification failed")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{candidate_backends_for, capability_for_backend, Backend};
+    use saywrite::host_api;
+
+    #[test]
+    fn classifies_typing_backends_honestly() {
+        assert_eq!(
+            capability_for_backend(Backend::IbusEngine),
+            host_api::INSERTION_CAPABILITY_TYPING
+        );
+        assert_eq!(
+            capability_for_backend(Backend::Wtype),
+            host_api::INSERTION_CAPABILITY_TYPING
+        );
+        assert_eq!(
+            capability_for_backend(Backend::Xdotool),
+            host_api::INSERTION_CAPABILITY_TYPING
+        );
+    }
+
+    #[test]
+    fn classifies_clipboard_and_notification_backends_separately() {
+        assert_eq!(
+            capability_for_backend(Backend::WlClipboard),
+            host_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY
+        );
+        assert_eq!(
+            capability_for_backend(Backend::NotifySend),
+            host_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY
+        );
+        assert_eq!(
+            capability_for_backend(Backend::Unavailable),
+            host_api::INSERTION_CAPABILITY_UNAVAILABLE
+        );
+    }
+
+    #[test]
+    fn prefers_ibus_on_gnome_wayland() {
+        let backends = candidate_backends_for(
+            "wayland",
+            true,
+            true,
+            &[
+                Backend::Wtype,
+                Backend::WlClipboard,
+                Backend::NotifySend,
+                Backend::IbusEngine,
+            ],
+        );
+        assert_eq!(backends.first().copied(), Some(Backend::IbusEngine));
+    }
+
+    #[test]
+    fn prefers_typing_backend_on_x11() {
+        let backends = candidate_backends_for(
+            "x11",
+            false,
+            false,
+            &[Backend::Xclip, Backend::Xdotool, Backend::NotifySend],
+        );
+        assert_eq!(backends.first().copied(), Some(Backend::Xdotool));
+    }
 }

@@ -135,4 +135,3 @@ fn is_word_boundary(input: &str, start: usize, end: usize) -> bool {
     !matches!(before, Some(ch) if ch.is_alphanumeric())
         && !matches!(after, Some(ch) if ch.is_alphanumeric())
 }
-

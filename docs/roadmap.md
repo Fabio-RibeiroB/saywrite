@@ -1,5 +1,9 @@
 # Roadmap
 
+Status: high-level product stages only.
+
+Do not use this as the current implementation plan. Use `next_steps.md` and `holistic_review.md` for current priorities and technical state.
+
 ## V0: Product Skeleton
 
 - GTK shell with polished onboarding-style UI
