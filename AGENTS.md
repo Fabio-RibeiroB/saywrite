@@ -32,6 +32,15 @@ SayWrite is a Linux-first dictation app with a Rust GTK4/libadwaita shell and a 
 | `scripts/install-host.sh` | installs `saywrite-host` as a user service + D-Bus service |
 | `scripts/install-gnome-shortcut.sh` | GNOME custom shortcut fallback helper |
 
+## User-Facing Modes
+
+The product exposes two modes to users:
+
+- **Clipboard Mode** — works with the Flatpak app alone; records, transcribes, cleans, and copies text to the clipboard. Default and always available.
+- **Direct Typing Mode** — requires `saywrite-host` installed outside the sandbox; text is inserted directly into the focused application via IBus (GNOME Wayland) or other backends.
+
+When writing copy, diagnostics, or onboarding text, use these mode names. Do not expose internal terms like "IBus bridge" or "D-Bus path" to users.
+
 ## Key Facts
 
 - `AppSettings.provider_mode` is an enum: `Local` or `Cloud`.
