@@ -1,127 +1,176 @@
 # SayWrite
 
-SayWrite is a Linux-first dictation project aimed at the Wispr Flow experience without the setup pain.
+SayWrite is a Linux dictation app. Press a hotkey, speak, and your words land in the active text field — cleaned up and ready to use.
 
-The goal is not "another speech-to-text demo." The goal is:
+Install through Flatpak. Use it right away with clipboard delivery. Optionally enable direct typing for deeper system integration.
 
-- global dictation that feels system-wide
-- easy install and updates through Flatpak
-- attractive, low-friction desktop UX
-- text cleanup that removes filler words and rough speech artifacts
-- optional command mode for punctuation, symbols, and editing verbs
-- support for both local and cloud transcription modes
+## How It Works for Users
 
-## Product Direction
+SayWrite has two user-facing modes:
 
-SayWrite should feel like a polished desktop product, not a terminal utility:
+### Clipboard Mode
 
-- one obvious toggle for dictation
-- clear microphone state
-- super-fast transcript preview
-- post-processing that turns spoken language into usable written language
-- system integration that works in normal Linux text fields
+Works with the Flatpak app alone. No host setup required.
 
-## Architecture Summary
+- press the dictation shortcut
+- speak
+- SayWrite records, transcribes, cleans up your text, and copies it to the clipboard
+- paste into any application
 
-This project uses a hybrid model because a pure sandboxed Flatpak cannot reliably inject text into arbitrary applications.
+This is the default mode and works on any desktop where the Flatpak runs.
 
-1. The Flatpak app provides the visible product:
-   - onboarding
-   - settings
-   - microphone controls
-   - transcript preview
-   - cleanup options
-   - local model management
-   - cloud mode selection
-2. A host-side integration service handles system-wide text entry:
-   - preferred path: IBus engine for real text-field integration
-   - fallback path: accessibility/clipboard insertion for unsupported cases
-3. A speech pipeline processes audio into cleaned text:
-   - streaming ASR backend
-   - rewrite/cleanup layer
-   - spoken command parser
-4. A backend probe keeps setup inside the app:
-   - detect GPU vendor
-   - choose CUDA, Vulkan, or CPU automatically
-   - show local model and cloud API readiness in-product
+### Direct Typing Mode
 
-More detail lives in [docs/architecture.md](/home/fabio/Documents/GitHub/saywrite/docs/architecture.md) and [docs/roadmap.md](/home/fabio/Documents/GitHub/saywrite/docs/roadmap.md).
+Requires the host companion (`saywrite-host`) installed alongside the Flatpak.
 
-## Why This Project Is Worth Doing
+- press the dictation shortcut
+- speak
+- SayWrite types the cleaned text directly into the focused application
 
-The current Linux options tend to fail in one of three ways:
+Direct typing is hotkey-driven — you do not need to keep the app open or switch focus. The app walks you through enabling this mode from its settings screen.
+
+## Current Support Status
+
+| Environment | Direct Typing | Clipboard Mode |
+|---|---|---|
+| GNOME Wayland + IBus | Supported | Supported |
+| X11 + xdotool | Untested | Supported |
+| wlroots Wayland + wtype | Untested | Supported |
+| Other Wayland compositors | Not available | Supported |
+
+**Supported** means tested end-to-end on real hardware. **Untested** means the code path exists but has not yet been validated. Clipboard Mode works everywhere the Flatpak runs.
+
+Do not expect universal direct typing support across all Linux desktops yet. The GNOME Wayland path (via IBus) is the current validated path. More environments will be confirmed as testing expands.
+
+## Current Product Model
+
+```
+┌─────────────────────────────┐
+│  Flatpak app (GTK/Adwaita)  │  ← install via Flatpak / Flathub
+│  settings · diagnostics     │
+│  transcript preview         │
+└────────────┬────────────────┘
+             │
+             │ Clipboard Mode (default)
+             │   transcript → clipboard → paste anywhere
+             │
+             │ Direct Typing Mode (optional host companion)
+             │   transcript → saywrite-host → IBus → active text field
+             │
+             ▼
+┌─────────────────────────────┐
+│  saywrite-host (native)     │  ← installed outside Flatpak sandbox
+│  IBus engine · fallbacks    │
+└─────────────────────────────┘
+```
+
+The Flatpak sandbox cannot inject keystrokes into arbitrary host applications. The host companion runs outside that boundary and handles text insertion. This is an intentional design, not a workaround: the Flatpak handles discovery, onboarding, and settings; the host companion handles system-wide input.
+
+## Installing
+
+Flatpak distribution is the planned primary install path. Instructions will be added here when the app reaches a public release.
+
+For now, see [Developer Setup](#developer-setup) below.
+
+## Why SayWrite
+
+Current Linux dictation options tend to fail in one of three ways:
 
 - good engine, bad UX
 - good UX, weak system integration
 - powerful setup, hostile onboarding
 
-SayWrite can be differentiated by taking the opposite stance: opinionated defaults, polished UI, and system integration designed from day one.
+SayWrite takes the opposite approach: opinionated defaults, polished UI, and system integration designed from the start.
 
-## Local Run
+## Developer Setup
 
-The app shell is now being rebuilt as a Rust + GTK4/libadwaita application. The older
-Python code remains in-tree as backend and prototype reference material while the UI
-migration is in progress.
+> **Note:** This section is for contributors building from source. It is not the end-user install flow.
 
-For local Rust/GTK development on Ubuntu-like systems:
+### Prerequisites (Ubuntu-like systems)
+
+Install Rust/GTK development dependencies:
 
 ```bash
 ./scripts/bootstrap-rust-dev.sh
 ```
 
-Then run:
-
-```bash
-cargo run
-```
-
-For local development dependencies on Ubuntu-like systems:
+Install native host dependencies:
 
 ```bash
 ./scripts/bootstrap-dev.sh
 ```
 
-To vendor and build the local `whisper.cpp` runtime for development:
+### Build and Run
+
+```bash
+cargo run
+```
+
+### Local Whisper Backend
+
+To use local transcription, build and set up `whisper.cpp`:
 
 ```bash
 ./scripts/setup-whispercpp.sh
-```
-
-To download the default local model for development:
-
-```bash
 ./scripts/download-local-model.sh
 ```
 
-To run the host-side insertion helper prototype:
+### Host Companion (Direct Typing Mode)
+
+Build and install `saywrite-host`:
 
 ```bash
-./scripts/run-host-helper.sh
+./scripts/install-host.sh
 ```
 
-On GNOME-based desktops without the GlobalShortcuts portal, install the prototype hands-free shortcut through GNOME custom shortcuts:
+This installs the companion daemon and sets up the systemd user service and D-Bus activation.
+
+### GNOME Shortcut (Developer Fallback)
+
+If the app's shortcut registration does not work on your dev setup, you can bind the hotkey manually:
 
 ```bash
 chmod +x ./scripts/run-global-dictation.sh ./scripts/install-gnome-shortcut.sh
 ./scripts/install-gnome-shortcut.sh
 ```
 
-That binds `Super+Alt+D` to `run-global-dictation.sh` for hands-free dictation.
+This binds `Super+Alt+D` to trigger dictation via D-Bus.
 
 ## Repository Layout
 
-- `saywrite/` application package
-- `data/` desktop metadata and icons
-- `flatpak/` Flatpak manifest
-- `docs/` product and architecture notes
+```
+src/                    Rust app source
+  bin/saywrite-host     Host companion daemon
+  ui/                   GTK/libadwaita UI components
+data/                   Desktop metadata and icons
+flatpak/                Flatpak manifest
+scripts/                Developer and installation scripts (see scripts/README.md)
+docs/                   Product and architecture documentation (see docs/README.md)
+vendor/                 Vendored dependencies (whisper.cpp)
+```
 
-## Current Status
+**Legacy material:** The Python backend and host-helper code remain in-tree as reference during the current Rust migration. They are not part of the intended long-term architecture.
 
-The project is now in an explicit migration phase:
+## Documentation
 
-- the visible app shell is moving to Rust + GTK4/libadwaita
-- the redesign branch's onboarding-first UX is now reflected in the main branch structure
-- Python backend and host-helper code remain in-tree temporarily so the working dictation prototype is not lost during the migration
-- the Flatpak manifest has been redirected toward a Rust binary build instead of the old Python entrypoint
+See [docs/README.md](docs/README.md) for the documentation index, including which docs are current versus historical.
 
-The next major milestone is wiring the Rust shell back to the working backend path, then replacing the helper fallback insertion approach with deeper input-method integration.
+Key docs:
+- [docs/next_steps.md](docs/next_steps.md) — active product and engineering priorities
+- [docs/support_matrix.md](docs/support_matrix.md) — release validation and supported environments
+- [docs/holistic_review.md](docs/holistic_review.md) — current technical assessment
+- [docs/architecture.md](docs/architecture.md) — design rationale (historical; not the current implementation plan)
+
+## Migration Status
+
+The app shell is being rebuilt in Rust + GTK4/libadwaita. The older Python code remains in-tree during this transition so the working dictation prototype is not lost.
+
+Current state:
+- GTK app exists as the setup and diagnostics surface
+- `saywrite-host` owns the real dictation workflow
+- global hotkey dictation works through the host path
+- local and cloud transcription both work end-to-end
+- direct insertion works on the validated GNOME Wayland setup
+- clipboard and notification fallbacks work on other environments
+
+The next major milestone is packaging the host companion cleanly so Direct Typing Mode feels like a single guided step inside the app, not a separate manual install.
