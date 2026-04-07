@@ -14,10 +14,9 @@ use crate::{
 };
 
 static ACTIVE_SESSION: OnceLock<Mutex<Option<RecordingSession>>> = OnceLock::new();
-pub const GST_CAPTURE_PIPELINE_ARGS: &[&str] = &[
-    "-q",
-    "-e",
-    "autoaudiosrc",
+/// Base GStreamer capture pipeline. The source element and any properties
+/// are prepended at launch time by `build_capture_args()`.
+const GST_CAPTURE_PIPELINE_TAIL: &[&str] = &[
     "!",
     "audioconvert",
     "!",
@@ -29,6 +28,55 @@ pub const GST_CAPTURE_PIPELINE_ARGS: &[&str] = &[
     "!",
     "filesink",
 ];
+
+/// Build the full gst-launch argument list, choosing the best microphone
+/// source available on this system. We avoid `autoaudiosrc` because it can
+/// pick up monitor/loopback sources instead of a real microphone.
+pub fn build_capture_args(location: &str) -> Vec<String> {
+    let mut args: Vec<String> = vec!["-q".into(), "-e".into()];
+
+    // Try to find a real hardware capture device via PipeWire/WirePlumber.
+    // `wpctl status` marks the default source with `*`.
+    if let Some(node_name) = default_pipewire_source() {
+        args.push("pulsesrc".into());
+        args.push(format!("device={node_name}"));
+    } else {
+        args.push("pulsesrc".into());
+    }
+
+    for part in GST_CAPTURE_PIPELINE_TAIL {
+        args.push((*part).into());
+    }
+    args.push(format!("location={location}"));
+    args
+}
+
+/// Ask WirePlumber for the default audio source node name.
+/// Returns `None` if wpctl is unavailable or output is unparseable.
+fn default_pipewire_source() -> Option<String> {
+    let output = Command::new("wpctl")
+        .args(["inspect", "@DEFAULT_AUDIO_SOURCE@"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    // Look for: node.name = "alsa_input.usb-...-00.mono-fallback"
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with("node.name") {
+            if let Some(value) = line.split('=').nth(1) {
+                let name = value.trim().trim_matches('"');
+                // Skip monitor sources — they capture desktop audio, not mic
+                if !name.contains("monitor") {
+                    return Some(name.to_string());
+                }
+            }
+        }
+    }
+    None
+}
 
 #[derive(Debug, Clone)]
 pub struct TranscriptResult {
@@ -116,9 +164,9 @@ pub fn start_live(settings: &AppSettings) -> Result<String> {
     }
 
     let audio_path = next_recording_path()?;
+    let capture_args = build_capture_args(&audio_path.display().to_string());
     let child = Command::new("gst-launch-1.0")
-        .args(GST_CAPTURE_PIPELINE_ARGS)
-        .arg(format!("location={}", audio_path.display()))
+        .args(&capture_args)
         .spawn()
         .context("failed to start microphone capture")?;
 
@@ -285,12 +333,40 @@ fn interrupt_recording(child: &mut Child) -> Result<()> {
     Ok(())
 }
 
+/// Minimum RMS energy (0.0–1.0 scale for 16-bit PCM) below which we treat
+/// the recording as silence. This filters out electrical crosstalk and
+/// background hum that whisper would otherwise hallucinate on.
+const SILENCE_RMS_THRESHOLD: f64 = 0.005;
+
 fn validate_recording(audio_path: &Path) -> Result<()> {
     let metadata = fs::metadata(audio_path)
         .with_context(|| format!("missing recording at {}", audio_path.display()))?;
     if metadata.len() == 0 {
         return Err(anyhow::Error::new(DictationError::NoAudioCaptured));
     }
+
+    // Read WAV samples and check RMS energy. The pipeline produces 16-bit
+    // mono PCM at 16 kHz wrapped in a WAV container (44-byte header).
+    if let Ok(data) = fs::read(audio_path) {
+        if data.len() > 44 {
+            let samples = &data[44..];
+            let count = samples.len() / 2;
+            if count > 0 {
+                let sum_sq: f64 = samples
+                    .chunks_exact(2)
+                    .map(|pair| {
+                        let sample = i16::from_le_bytes([pair[0], pair[1]]) as f64 / 32768.0;
+                        sample * sample
+                    })
+                    .sum();
+                let rms = (sum_sq / count as f64).sqrt();
+                if rms < SILENCE_RMS_THRESHOLD {
+                    return Err(anyhow::Error::new(DictationError::NoAudioCaptured));
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 

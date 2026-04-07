@@ -6,7 +6,7 @@ use gtk::{glib, Align, Orientation};
 
 use crate::{
     config::{AppSettings, ProviderMode},
-    dictation::GST_CAPTURE_PIPELINE_ARGS,
+    dictation::build_capture_args,
     model_installer,
     ui::async_poll,
 };
@@ -458,10 +458,11 @@ fn test_mic_access() -> Result<bool, String> {
     let test_file = tmp_dir.join("mic-test.wav");
 
     // Record 1.5 seconds of audio
+    let capture_args = build_capture_args(&test_file.display().to_string());
     let status = Command::new("timeout")
-        .args(["2", "gst-launch-1.0"])
-        .args(GST_CAPTURE_PIPELINE_ARGS)
-        .arg(format!("location={}", test_file.display()))
+        .arg("2")
+        .arg("gst-launch-1.0")
+        .args(&capture_args)
         .status()
         .map_err(|e| format!("failed to run mic test: {e}"))?;
 
