@@ -209,6 +209,10 @@ pub fn global_engine_name() -> Result<String> {
 
 impl IbusBridge {
     async fn commit_text(&self, text: &str) -> Result<String> {
+        if text.trim().is_empty() {
+            return Err(anyhow!("No text was provided for IBus insertion."));
+        }
+
         current_input_context().context("no focused IBus input context is available")?;
         let previous_engine = global_engine_name().unwrap_or_else(|_| "xkb:us::eng".into());
         let (tx, rx) = oneshot::channel();
@@ -236,13 +240,20 @@ impl IbusBridge {
         let proxy = Proxy::new(&connection, IBUS_DEST, IBUS_PATH, IBUS_IFACE)
             .await
             .context("failed to create an IBus proxy for SayWrite")?;
-        proxy
+
+        eprintln!(
+            "IBus: swapping engine from '{}' to SayWrite for text commit",
+            previous_engine
+        );
+        if let Err(err) = proxy
             .call_method("SetGlobalEngine", &(ENGINE_NAME,))
             .await
             .context("failed to activate the SayWrite IBus engine")
-            .inspect_err(|_| {
-                self.clear_pending_commit();
-            })?;
+        {
+            self.clear_pending_commit().await;
+            eprintln!("IBus: failed to set global engine to SayWrite: {err:#}");
+            return Err(err);
+        }
 
         match timeout(Duration::from_secs(3), rx).await {
             Ok(Ok(Ok(message))) => Ok(message),
@@ -251,10 +262,12 @@ impl IbusBridge {
                 Err(anyhow!(message))
             }
             Ok(Err(_)) => {
+                eprintln!("IBus: pending commit channel was dropped unexpectedly");
                 self.restore_after_failed_commit(&previous_engine).await;
                 Err(anyhow!("SayWrite IBus engine dropped the pending commit"))
             }
             Err(_) => {
+                eprintln!("IBus: timed out waiting for SayWrite engine focus_in callback");
                 self.restore_after_failed_commit(&previous_engine).await;
                 Err(anyhow!(
                     "Timed out waiting for the SayWrite IBus engine to commit text"
@@ -263,12 +276,9 @@ impl IbusBridge {
         }
     }
 
-    fn clear_pending_commit(&self) {
-        let inner = self.inner.clone();
-        tokio::spawn(async move {
-            let mut pending = inner.pending_commit.lock().await;
-            pending.take();
-        });
+    async fn clear_pending_commit(&self) {
+        let mut pending = self.inner.pending_commit.lock().await;
+        pending.take();
     }
 
     async fn restore_after_failed_commit(&self, previous_engine: &str) {
@@ -279,7 +289,12 @@ impl IbusBridge {
 
         let connection = self.inner.connection.lock().await.clone();
         if let Some(connection) = connection {
-            let _ = restore_previous_engine(&connection, previous_engine).await;
+            if let Err(err) = restore_previous_engine(&connection, previous_engine).await {
+                eprintln!(
+                    "IBus: failed to restore engine '{}' after failed commit: {err:#}",
+                    previous_engine
+                );
+            }
         }
     }
 }
@@ -384,11 +399,29 @@ impl IbusEngine {
             fdo::Error::Failed(format!("failed to emit SayWrite CommitText: {err}"))
         })?;
 
+        eprintln!(
+            "IBus: committed {} bytes, restoring engine '{}'",
+            pending.text.len(),
+            pending.previous_engine
+        );
+
         if let Some(connection) = self.inner.connection.lock().await.clone() {
             let previous_engine = pending.previous_engine.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_millis(120)).await;
-                let _ = restore_previous_engine(&connection, &previous_engine).await;
+                if let Err(err) = restore_previous_engine(&connection, &previous_engine).await {
+                    eprintln!(
+                        "IBus: failed to restore engine '{}': {err:#}",
+                        previous_engine
+                    );
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    if let Err(err) = restore_previous_engine(&connection, &previous_engine).await {
+                        eprintln!(
+                            "IBus: retry to restore engine '{}' also failed: {err:#}",
+                            previous_engine
+                        );
+                    }
+                }
             });
         }
 
@@ -531,8 +564,40 @@ mod tests {
     }
 
     #[test]
+    fn parses_outputs_with_extra_whitespace() {
+        let object_output = "  random prefix (objectpath '/org/freedesktop/IBus/InputContext_42',)  ";
+        let engine_output =
+            "  (< 'IBusEngineDesc', {},   'xkb:gb::eng', 'English (UK)', '', 'en_GB', '', '', '', uint32 0, '', '', '', '', '', '', '', ''>,)  ";
+        assert_eq!(
+            parse_object_path(object_output).as_deref(),
+            Some("/org/freedesktop/IBus/InputContext_42")
+        );
+        assert_eq!(parse_engine_name(engine_output).as_deref(), Some("xkb:gb::eng"));
+    }
+
+    #[test]
+    fn parses_high_numbered_input_context_paths() {
+        let output = "(objectpath '/org/freedesktop/IBus/InputContext_184467',)";
+        assert_eq!(
+            parse_object_path(output).as_deref(),
+            Some("/org/freedesktop/IBus/InputContext_184467")
+        );
+    }
+
+    #[test]
+    fn parses_engine_names_with_unusual_locale_identifiers() {
+        let output = "(<'IBusEngineDesc', {}, 'typing-booster:sv_SE.UTF-8', 'Swedish', '', 'sv_SE.UTF-8', '', '', '', uint32 0, '', '', '', '', '', '', '', ''>,)";
+        assert_eq!(
+            parse_engine_name(output).as_deref(),
+            Some("typing-booster:sv_SE.UTF-8")
+        );
+    }
+
+    #[test]
     fn returns_none_for_unexpected_gdbus_output() {
         assert_eq!(parse_object_path("()"), None);
         assert_eq!(parse_engine_name("()"), None);
+        assert_eq!(parse_object_path(""), None);
+        assert_eq!(parse_engine_name(""), None);
     }
 }

@@ -336,7 +336,7 @@ fn notify_transcript(text: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{candidate_backends_for, capability_for_backend, Backend};
+    use super::{candidate_backends_for, capability_for_backend, result_kind_for_backend, Backend};
     use saywrite::host_api;
 
     #[test]
@@ -372,6 +372,42 @@ mod tests {
     }
 
     #[test]
+    fn reports_result_kind_for_each_backend_honestly() {
+        assert_eq!(
+            result_kind_for_backend(Backend::IbusEngine),
+            host_api::INSERTION_RESULT_TYPED
+        );
+        assert_eq!(
+            result_kind_for_backend(Backend::Wtype),
+            host_api::INSERTION_RESULT_TYPED
+        );
+        assert_eq!(
+            result_kind_for_backend(Backend::Xdotool),
+            host_api::INSERTION_RESULT_TYPED
+        );
+        assert_eq!(
+            result_kind_for_backend(Backend::WlClipboard),
+            host_api::INSERTION_RESULT_COPIED
+        );
+        assert_eq!(
+            result_kind_for_backend(Backend::Xclip),
+            host_api::INSERTION_RESULT_COPIED
+        );
+        assert_eq!(
+            result_kind_for_backend(Backend::Xsel),
+            host_api::INSERTION_RESULT_COPIED
+        );
+        assert_eq!(
+            result_kind_for_backend(Backend::NotifySend),
+            host_api::INSERTION_RESULT_NOTIFIED
+        );
+        assert_eq!(
+            result_kind_for_backend(Backend::Unavailable),
+            host_api::INSERTION_RESULT_FAILED
+        );
+    }
+
+    #[test]
     fn prefers_ibus_on_gnome_wayland() {
         let backends = candidate_backends_for(
             "wayland",
@@ -396,5 +432,39 @@ mod tests {
             &[Backend::Xclip, Backend::Xdotool, Backend::NotifySend],
         );
         assert_eq!(backends.first().copied(), Some(Backend::Xdotool));
+    }
+
+    #[test]
+    fn falls_back_to_clipboard_on_unknown_session_type() {
+        let backends = candidate_backends_for(
+            "tty",
+            false,
+            false,
+            &[Backend::Wtype, Backend::Xdotool, Backend::Xclip, Backend::NotifySend],
+        );
+        assert_eq!(
+            backends,
+            vec![Backend::Xclip, Backend::NotifySend]
+        );
+    }
+
+    #[test]
+    fn returns_unavailable_when_no_backends_exist() {
+        let backends = candidate_backends_for("wayland", false, false, &[]);
+        assert_eq!(backends, vec![Backend::Unavailable]);
+    }
+
+    #[test]
+    fn prefers_wtype_on_non_gnome_wayland_even_if_ibus_exists() {
+        let backends = candidate_backends_for(
+            "wayland",
+            false,
+            true,
+            &[Backend::IbusEngine, Backend::Wtype, Backend::WlClipboard],
+        );
+        assert_eq!(
+            backends,
+            vec![Backend::Wtype, Backend::WlClipboard]
+        );
     }
 }

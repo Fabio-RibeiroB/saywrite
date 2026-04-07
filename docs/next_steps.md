@@ -98,6 +98,7 @@ Success bar:
 The risky part of the product is now host behavior, not transcript cleanup.
 
 - keep expanding the new host-side unit coverage
+- keep the current coverage for backend classification, result-kind mapping, candidate ordering, and IBus parsing
 - add tests around IBus engine restore behavior
 - add tests for host D-Bus state transitions
 - add tests for fallback result reporting, not just backend classification
