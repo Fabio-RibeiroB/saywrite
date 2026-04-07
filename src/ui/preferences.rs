@@ -401,24 +401,86 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
         note_group.add(&shortcut_row);
     } else {
         let install_row = adw::ActionRow::builder()
-            .title("Install host companion")
-            .subtitle("Enables hotkey dictation and host-side text delivery")
+            .title("Direct Typing Mode")
+            .subtitle("Install the host companion to enable hotkey dictation and direct text insertion.")
             .build();
-        let install_info_btn = gtk::Button::with_label("How to install");
-        install_info_btn.set_valign(Align::Center);
-        install_info_btn.add_css_class("flat");
-        install_info_btn.connect_clicked(move |btn| {
-            let parent_window: Option<gtk::Window> = btn.root().and_then(|r| r.downcast().ok());
-            let dialog = adw::MessageDialog::new(
-                parent_window.as_ref(),
-                Some("Install Host Companion"),
-                Some(&host_integration::host_install_instructions()),
-            );
-            dialog.add_response("ok", "OK");
-            dialog.present();
-        });
-        install_row.add_suffix(&install_info_btn);
+
+        let install_progress_row = adw::ActionRow::builder()
+            .title("Installing\u{2026}")
+            .subtitle("Starting")
+            .build();
+        install_progress_row.set_visible(false);
+
+        let install_btn = gtk::Button::with_label("Enable Direct Typing");
+        install_btn.set_valign(Align::Center);
+        install_btn.add_css_class("suggested-action");
+
+        {
+            let install_btn = install_btn.clone();
+            let install_row = install_row.clone();
+            let install_progress_row = install_progress_row.clone();
+            install_btn.connect_clicked(move |btn| {
+                btn.set_sensitive(false);
+                btn.set_label("Installing\u{2026}");
+                install_progress_row.set_visible(true);
+                install_progress_row.set_subtitle("Starting\u{2026}");
+                install_row.set_subtitle("Installation in progress\u{2026}");
+
+                let rx = host_integration::install_host_companion();
+
+                let btn = btn.clone();
+                let install_row = install_row.clone();
+                let install_progress_row = install_progress_row.clone();
+                let btn_dc = btn.clone();
+                let install_row_dc = install_row.clone();
+                let install_progress_row_dc = install_progress_row.clone();
+                async_poll::poll_receiver(
+                    rx,
+                    Duration::from_millis(200),
+                    move |result| match result {
+                        Ok(host_integration::HostInstallUpdate::Progress(msg)) => {
+                            install_progress_row.set_subtitle(&msg);
+                            glib::ControlFlow::Continue
+                        }
+                        Ok(host_integration::HostInstallUpdate::Done) => {
+                            btn.set_label("Installed");
+                            btn.remove_css_class("suggested-action");
+                            install_row.set_subtitle(
+                                "Host companion installed. Reopen Settings to confirm status.",
+                            );
+                            install_progress_row.set_title("Done");
+                            install_progress_row.set_subtitle(
+                                "saywrite-host is running as a user service.",
+                            );
+                            glib::ControlFlow::Break
+                        }
+                        Err(msg) => {
+                            btn.set_label("Retry");
+                            btn.set_sensitive(true);
+                            btn.add_css_class("suggested-action");
+                            install_row.set_subtitle("Installation failed — see details below.");
+                            install_progress_row.set_title("Failed");
+                            install_progress_row.set_subtitle(&msg);
+                            glib::ControlFlow::Break
+                        }
+                    },
+                    move || {
+                        btn_dc.set_label("Retry");
+                        btn_dc.set_sensitive(true);
+                        btn_dc.add_css_class("suggested-action");
+                        install_row_dc.set_subtitle("Installation stopped unexpectedly.");
+                        install_progress_row_dc.set_title("Stopped");
+                        install_progress_row_dc
+                            .set_subtitle("The install process exited without completing.");
+                        glib::ControlFlow::Break
+                    },
+                );
+            });
+        }
+
+        install_row.add_suffix(&install_btn);
         note_group.add(&install_row);
+        note_group.add(&install_progress_row);
     }
 
     page.add(&note_group);

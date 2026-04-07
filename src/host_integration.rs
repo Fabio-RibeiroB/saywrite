@@ -160,6 +160,96 @@ pub fn host_setup_status() -> HostSetupStatus {
     }
 }
 
+/// Progress update sent from `install_host_companion` to the UI thread.
+pub enum HostInstallUpdate {
+    /// An intermediate status message to display while work is in progress.
+    Progress(String),
+    /// Installation completed successfully.
+    Done,
+}
+
+/// Kick off host companion installation in a background thread.
+/// Returns a receiver that delivers `Ok(HostInstallUpdate)` progress messages
+/// or `Err(String)` on fatal failure. Channel disconnect signals the end of
+/// the run (check whether the last message was `Done` or `Err`).
+pub fn install_host_companion(
+) -> std::sync::mpsc::Receiver<Result<HostInstallUpdate, String>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let repo_root = match repo_root() {
+            Some(root) => root,
+            None => {
+                let _ = tx.send(Err(
+                    "Could not locate the SayWrite source repository. \
+                     Run this from the repo directory."
+                        .into(),
+                ));
+                return;
+            }
+        };
+
+        let install_script = repo_root.join("scripts/install-host.sh");
+        if !install_script.exists() {
+            let _ = tx.send(Err(format!(
+                "Install script not found at {}",
+                install_script.display()
+            )));
+            return;
+        }
+
+        // Build the release binary if it is not already present.
+        let binary = repo_root.join("target/release/saywrite-host");
+        if !binary.exists() {
+            let _ = tx.send(Ok(HostInstallUpdate::Progress(
+                "Building saywrite-host — this may take a minute\u{2026}".into(),
+            )));
+            match std::process::Command::new("cargo")
+                .args(["build", "--release", "--bin", "saywrite-host"])
+                .current_dir(&repo_root)
+                .output()
+            {
+                Ok(out) if out.status.success() => {
+                    let _ = tx.send(Ok(HostInstallUpdate::Progress("Build complete.".into())));
+                }
+                Ok(out) => {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    let snippet = stderr.lines().take(6).collect::<Vec<_>>().join("\n");
+                    let _ = tx.send(Err(format!("Build failed:\n{snippet}")));
+                    return;
+                }
+                Err(e) => {
+                    let _ = tx.send(Err(format!("Failed to run cargo: {e}")));
+                    return;
+                }
+            }
+        }
+
+        let _ = tx.send(Ok(HostInstallUpdate::Progress(
+            "Installing host companion\u{2026}".into(),
+        )));
+        match std::process::Command::new("bash")
+            .arg(&install_script)
+            .current_dir(&repo_root)
+            .output()
+        {
+            Ok(out) if out.status.success() => {
+                let _ = tx.send(Ok(HostInstallUpdate::Done));
+            }
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                let text = if !stderr.is_empty() { stderr } else { stdout };
+                let snippet = text.lines().take(6).collect::<Vec<_>>().join("\n");
+                let _ = tx.send(Err(format!("Install script failed:\n{snippet}")));
+            }
+            Err(e) => {
+                let _ = tx.send(Err(format!("Failed to run install script: {e}")));
+            }
+        }
+    });
+    rx
+}
+
 pub fn host_install_instructions() -> String {
     let setup = host_setup_status();
     let mut steps = vec![
