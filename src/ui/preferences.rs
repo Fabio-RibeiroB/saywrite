@@ -399,7 +399,8 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
             })
             .build();
         note_group.add(&shortcut_row);
-    } else {
+    } else if host_integration::can_install_in_app() {
+        // Source repo is available — offer one-click install.
         let install_row = adw::ActionRow::builder()
             .title("Direct Typing Mode")
             .subtitle("Install the host companion to enable hotkey dictation and direct text insertion.")
@@ -481,6 +482,15 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
         install_row.add_suffix(&install_btn);
         note_group.add(&install_row);
         note_group.add(&install_progress_row);
+    } else {
+        // No source repo available (packaged/Flatpak install) — show manual
+        // install guidance instead of a button that would always fail.
+        let instructions = host_integration::host_install_instructions();
+        let manual_row = adw::ActionRow::builder()
+            .title("Direct Typing Mode")
+            .subtitle(&instructions)
+            .build();
+        note_group.add(&manual_row);
     }
 
     page.add(&note_group);

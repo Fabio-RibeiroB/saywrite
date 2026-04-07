@@ -160,6 +160,15 @@ pub fn host_setup_status() -> HostSetupStatus {
     }
 }
 
+/// Returns `true` when the SayWrite source repo is reachable and the install
+/// script is present, meaning `install_host_companion()` can succeed.
+/// When this returns `false` the UI should show manual-install guidance instead.
+pub fn can_install_in_app() -> bool {
+    repo_root()
+        .map(|r| r.join("scripts/install-host.sh").exists())
+        .unwrap_or(false)
+}
+
 /// Progress update sent from `install_host_companion` to the UI thread.
 pub enum HostInstallUpdate {
     /// An intermediate status message to display while work is in progress.
@@ -312,12 +321,15 @@ fn gnome_shortcut_command() -> Option<String> {
 }
 
 fn repo_root() -> Option<PathBuf> {
-    let current_dir = env::current_dir().ok();
     let exe_dir = env::current_exe()
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf));
+    let current_dir = env::current_dir().ok();
 
-    [current_dir, exe_dir]
+    // Prefer the executable's location — it is stable even when the user
+    // launches SayWrite from an unrelated directory that happens to contain
+    // its own Cargo.toml + scripts/ folder.
+    [exe_dir, current_dir]
         .into_iter()
         .flatten()
         .find_map(find_repo_root)
@@ -325,7 +337,12 @@ fn repo_root() -> Option<PathBuf> {
 
 fn find_repo_root(start: PathBuf) -> Option<PathBuf> {
     for candidate in start.ancestors() {
-        if candidate.join("Cargo.toml").exists() && candidate.join("scripts").is_dir() {
+        // Check for the SayWrite-specific install script rather than a
+        // generic Cargo.toml + scripts/ pair, so we don't accidentally
+        // resolve into an unrelated Rust project.
+        if candidate.join("Cargo.toml").exists()
+            && candidate.join("scripts/install-host.sh").exists()
+        {
             return Some(candidate.to_path_buf());
         }
     }
