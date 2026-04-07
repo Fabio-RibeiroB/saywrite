@@ -460,7 +460,7 @@ fn build_body(
     // Check readiness and gate the button
     {
         let host_ready = host_status.is_some();
-        let host_setup = host_integration::host_setup_status();
+        let host_setup = crate::host_setup::host_setup_status();
         let probe = runtime::probe_runtime(&settings.borrow());
         let mut blocking_setup_issue = false;
         if !host_ready {

@@ -2,6 +2,7 @@ mod dbus;
 mod hotkey;
 mod ibus;
 mod insertion;
+mod service;
 
 use anyhow::{Context, Result};
 use tokio::signal::unix::{signal, SignalKind};

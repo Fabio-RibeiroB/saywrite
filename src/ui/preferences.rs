@@ -409,7 +409,7 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
         .build();
     let probe = probe_runtime(&settings.borrow());
     let host_status = host_integration::host_status();
-    let host_setup = host_integration::host_setup_status();
+    let host_setup = crate::host_setup::host_setup_status();
 
     page.add(&build_probe_group("Runtime", &probe));
 
@@ -475,7 +475,7 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
             })
             .build();
         note_group.add(&shortcut_row);
-    } else if host_integration::can_install_in_app() {
+    } else if crate::host_setup::can_install_in_app() {
         // Source repo is available — offer one-click install.
         let install_row = adw::ActionRow::builder()
             .title("Direct Typing Mode")
@@ -503,7 +503,7 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
                 install_progress_row.set_subtitle("Starting\u{2026}");
                 install_row.set_subtitle("Installation in progress\u{2026}");
 
-                let rx = host_integration::install_host_companion();
+                let rx = crate::host_setup::install_host_companion();
 
                 let btn = btn.clone();
                 let install_row = install_row.clone();
@@ -515,11 +515,11 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
                     rx,
                     Duration::from_millis(200),
                     move |result| match result {
-                        Ok(host_integration::HostInstallUpdate::Progress(msg)) => {
+                        Ok(crate::host_setup::HostInstallUpdate::Progress(msg)) => {
                             install_progress_row.set_subtitle(&msg);
                             glib::ControlFlow::Continue
                         }
-                        Ok(host_integration::HostInstallUpdate::Done) => {
+                        Ok(crate::host_setup::HostInstallUpdate::Done) => {
                             btn.set_label("Installed");
                             btn.remove_css_class("suggested-action");
                             install_row.set_subtitle(
@@ -561,7 +561,7 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
     } else {
         // No source repo available (packaged/Flatpak install) — show manual
         // install guidance instead of a button that would always fail.
-        let instructions = host_integration::host_install_instructions();
+        let instructions = crate::host_setup::host_install_instructions();
         let manual_row = adw::ActionRow::builder()
             .title("Direct Typing Mode")
             .subtitle(&instructions)
