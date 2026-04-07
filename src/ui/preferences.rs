@@ -6,27 +6,44 @@ use gtk::{glib, Align};
 
 use crate::{
     config::{AppSettings, ModelSize, ProviderMode},
-    host_integration, model_installer,
+    dictation, host_integration, model_installer,
     runtime::{probe_runtime, RuntimeProbe},
     ui::async_poll,
 };
 
 const SETTINGS_SAVE_DEBOUNCE_MS: u64 = 300;
 
-pub fn present(parent: &adw::ApplicationWindow, settings: Rc<RefCell<AppSettings>>) {
-    let prefs = adw::PreferencesWindow::builder()
-        .transient_for(parent)
-        .modal(true)
-        .search_enabled(false)
-        .title("SayWrite Settings")
-        .default_width(720)
-        .default_height(560)
+pub fn build_inline_page<F>(settings: Rc<RefCell<AppSettings>>, on_back: F) -> gtk::Widget
+where
+    F: Fn() + 'static,
+{
+    let header = adw::HeaderBar::new();
+    let back_btn = gtk::Button::builder()
+        .icon_name("go-previous-symbolic")
+        .tooltip_text("Back")
         .build();
+    back_btn.add_css_class("flat");
+    back_btn.connect_clicked(move |_| on_back());
+    header.pack_start(&back_btn);
 
-    prefs.add(&build_engine_page(settings.clone()));
-    prefs.add(&build_shortcut_page(settings.clone()));
-    prefs.add(&build_diagnostics_page(settings));
-    prefs.present();
+    let title = adw::WindowTitle::builder()
+        .title("Settings")
+        .build();
+    header.set_title_widget(Some(&title));
+
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    content.append(&build_engine_page(settings.clone()));
+    content.append(&build_shortcut_page(settings.clone()));
+    content.append(&build_diagnostics_page(settings));
+
+    let scroller = gtk::ScrolledWindow::new();
+    scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
+    scroller.set_child(Some(&content));
+
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&header);
+    toolbar.set_content(Some(&scroller));
+    toolbar.upcast()
 }
 
 fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage {
@@ -63,6 +80,43 @@ fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage
         });
     }
     mode_group.add(&mode_row);
+
+    let mic_group = adw::PreferencesGroup::builder()
+        .title("Microphone")
+        .description("Choose which input device SayWrite should record from.")
+        .build();
+
+    let devices = dictation::list_input_devices();
+    let mut device_labels = vec!["System default".to_string()];
+    device_labels.extend(devices.iter().map(|d| d.label.clone()));
+    let selected_device = settings.borrow().input_device_name.clone();
+    let selected_index = selected_device
+        .as_ref()
+        .and_then(|id| devices.iter().position(|d| d.id == *id))
+        .map(|i| i + 1)
+        .unwrap_or(0) as u32;
+
+    let mic_row = adw::ComboRow::builder()
+        .title("Input device")
+        .subtitle("Used for dictation recording")
+        .build();
+    let labels: Vec<&str> = device_labels.iter().map(|s| s.as_str()).collect();
+    mic_row.set_model(Some(&gtk::StringList::new(&labels)));
+    mic_row.set_selected(selected_index);
+    {
+        let settings = settings.clone();
+        mic_row.connect_selected_notify(move |row| {
+            let mut state = settings.borrow_mut();
+            let idx = row.selected() as usize;
+            state.input_device_name = if idx == 0 {
+                None
+            } else {
+                devices.get(idx - 1).map(|d| d.id.clone())
+            };
+            let _ = state.save();
+        });
+    }
+    mic_group.add(&mic_row);
 
     let local_group = adw::PreferencesGroup::builder()
         .title("Local Model")
@@ -283,6 +337,7 @@ fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage
     cloud_group.add(&key_row);
 
     page.add(&mode_group);
+    page.add(&mic_group);
     page.add(&local_group);
     page.add(&cloud_group);
     page
@@ -322,7 +377,28 @@ fn build_shortcut_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPa
 
     group.add(&shortcut_row);
     group.add(&note_row);
+
+    let behaviour_group = adw::PreferencesGroup::builder()
+        .title("During dictation")
+        .build();
+
+    let pause_audio_row = adw::SwitchRow::builder()
+        .title("Pause PC audio while recording")
+        .subtitle("Mutes all playback when dictation starts and restores it when you stop.")
+        .build();
+    pause_audio_row.set_active(settings.borrow().pause_audio_during_dictation);
+    {
+        let settings = settings.clone();
+        pause_audio_row.connect_active_notify(move |row| {
+            let mut state = settings.borrow_mut();
+            state.pause_audio_during_dictation = row.is_active();
+            let _ = state.save();
+        });
+    }
+    behaviour_group.add(&pause_audio_row);
+
     page.add(&group);
+    page.add(&behaviour_group);
     page
 }
 

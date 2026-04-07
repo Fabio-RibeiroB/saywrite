@@ -83,6 +83,10 @@ pub struct AppSettings {
     pub global_shortcut_label: String,
     #[serde(default)]
     pub model_size: ModelSize,
+    #[serde(default)]
+    pub input_device_name: Option<String>,
+    #[serde(default)]
+    pub pause_audio_during_dictation: bool,
 }
 
 impl Default for AppSettings {
@@ -98,6 +102,8 @@ impl Default for AppSettings {
             auto_type_into_focused_app: default_auto_type(),
             global_shortcut_label: default_shortcut(),
             model_size: ModelSize::default(),
+            input_device_name: None,
+            pause_audio_during_dictation: false,
         }
     }
 }

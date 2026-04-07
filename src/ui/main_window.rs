@@ -19,6 +19,10 @@ const ASYNC_POLL_INTERVAL: Duration = Duration::from_millis(80);
 struct MainWindowUi {
     spinner: gtk::Spinner,
     spinner_row: gtk::Box,
+    listening_visual: gtk::Box,
+    waveform_bars: Vec<gtk::Box>,
+    waveform_tick: Rc<RefCell<u32>>,
+    waveform_source: Rc<RefCell<Option<glib::SourceId>>>,
     state_label: gtk::Label,
     setup_panel: gtk::Box,
     setup_title: gtk::Label,
@@ -103,6 +107,7 @@ impl MainWindowUi {
         match state {
             "listening" => {
                 *self.is_listening.borrow_mut() = true;
+                self.start_listening_visual();
                 self.spinner.stop();
                 self.spinner_row.set_visible(false);
                 self.state_label.set_label("Listening…");
@@ -112,6 +117,7 @@ impl MainWindowUi {
                 self.dictate_btn.set_sensitive(true);
             }
             "processing" => {
+                self.stop_listening_visual();
                 self.spinner_row.set_visible(true);
                 self.spinner.start();
                 self.state_label.set_label("Processing your transcript…");
@@ -119,6 +125,7 @@ impl MainWindowUi {
             }
             "done" | "idle" => {
                 *self.is_listening.borrow_mut() = false;
+                self.stop_listening_visual();
                 self.spinner.stop();
                 self.spinner_row.set_visible(false);
                 self.dictate_btn.remove_css_class("destructive-action");
@@ -132,6 +139,41 @@ impl MainWindowUi {
                 });
             }
             _ => {}
+        }
+    }
+
+    fn start_listening_visual(&self) {
+        self.listening_visual.set_visible(true);
+        if self.waveform_source.borrow().is_some() {
+            return;
+        }
+
+        let bars = self.waveform_bars.clone();
+        let tick = self.waveform_tick.clone();
+        let source = glib::timeout_add_local(Duration::from_millis(90), move || {
+            let mut frame = tick.borrow_mut();
+            *frame = frame.wrapping_add(1);
+            let current = *frame as f64;
+
+            for (index, bar) in bars.iter().enumerate() {
+                let phase = current / 2.4 + index as f64 * 0.8;
+                let height =
+                    14.0 + (phase.sin().abs() * 28.0) + (((phase * 0.55).cos() + 1.0) * 7.0);
+                bar.set_height_request(height.round() as i32);
+            }
+
+            glib::ControlFlow::Continue
+        });
+        *self.waveform_source.borrow_mut() = Some(source);
+    }
+
+    fn stop_listening_visual(&self) {
+        self.listening_visual.set_visible(false);
+        if let Some(source) = self.waveform_source.borrow_mut().take() {
+            source.remove();
+        }
+        for bar in &self.waveform_bars {
+            bar.set_height_request(12);
         }
     }
 
@@ -209,17 +251,28 @@ pub fn present(app: &adw::Application, settings: Rc<RefCell<AppSettings>>) {
         .build();
     window.set_size_request(480, 520);
 
+    let stack = gtk::Stack::new();
+    stack.set_transition_type(gtk::StackTransitionType::SlideLeftRight);
+    stack.set_transition_duration(200);
+
     let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&build_header(&window, settings.clone()));
-    toolbar.set_content(Some(&build_body(&window, settings)));
-    window.set_content(Some(&toolbar));
+    toolbar.add_top_bar(&build_header(&stack, settings.clone()));
+    toolbar.set_content(Some(&build_body(&window, &stack, settings.clone())));
+    stack.add_named(&toolbar, Some("main"));
+
+    let settings_page = preferences::build_inline_page(settings, {
+        let stack = stack.clone();
+        move || {
+            stack.set_visible_child_name("main");
+        }
+    });
+    stack.add_named(&settings_page, Some("settings"));
+
+    window.set_content(Some(&stack));
     window.present();
 }
 
-fn build_header(
-    window: &adw::ApplicationWindow,
-    settings: Rc<RefCell<AppSettings>>,
-) -> adw::HeaderBar {
+fn build_header(stack: &gtk::Stack, settings: Rc<RefCell<AppSettings>>) -> adw::HeaderBar {
     let header = adw::HeaderBar::new();
 
     let mode_chip = gtk::Button::new();
@@ -228,9 +281,10 @@ fn build_header(
     mode_chip.set_child(Some(&mode_chip_content(&settings.borrow())));
     mode_chip.set_tooltip_text(Some("Open settings"));
     {
-        let window = window.clone();
-        let settings = settings.clone();
-        mode_chip.connect_clicked(move |_| preferences::present(&window, settings.clone()));
+        let stack = stack.clone();
+        mode_chip.connect_clicked(move |_| {
+            stack.set_visible_child_name("settings");
+        });
     }
     header.pack_start(&mode_chip);
 
@@ -240,16 +294,21 @@ fn build_header(
     prefs.add_css_class("flat");
     prefs.set_tooltip_text(Some("Open settings"));
     {
-        let window = window.clone();
-        let settings = settings.clone();
-        prefs.connect_clicked(move |_| preferences::present(&window, settings.clone()));
+        let stack = stack.clone();
+        prefs.connect_clicked(move |_| {
+            stack.set_visible_child_name("settings");
+        });
     }
     header.pack_end(&prefs);
 
     header
 }
 
-fn build_body(window: &adw::ApplicationWindow, settings: Rc<RefCell<AppSettings>>) -> gtk::Widget {
+fn build_body(
+    window: &adw::ApplicationWindow,
+    stack: &gtk::Stack,
+    settings: Rc<RefCell<AppSettings>>,
+) -> gtk::Widget {
     let outer = gtk::Box::new(Orientation::Vertical, 0);
     outer.set_valign(Align::Center);
     outer.set_vexpand(true);
@@ -267,6 +326,23 @@ fn build_body(window: &adw::ApplicationWindow, settings: Rc<RefCell<AppSettings>
     spinner_row.set_halign(Align::Center);
     spinner_row.append(&spinner);
     spinner_row.set_visible(false);
+
+    // Waveform visual (shown while listening)
+    let listening_visual = gtk::Box::new(Orientation::Horizontal, 6);
+    listening_visual.set_halign(Align::Center);
+    listening_visual.set_valign(Align::Center);
+    listening_visual.set_margin_top(8);
+    listening_visual.set_margin_bottom(8);
+    listening_visual.set_visible(false);
+
+    let mut waveform_bars = Vec::new();
+    for _ in 0..5 {
+        let bar = gtk::Box::new(Orientation::Vertical, 0);
+        bar.add_css_class("waveform-bar");
+        bar.set_size_request(10, 12);
+        listening_visual.append(&bar);
+        waveform_bars.push(bar);
+    }
 
     // State label
     let state_label = gtk::Label::new(Some("Ready"));
@@ -302,9 +378,10 @@ fn build_body(window: &adw::ApplicationWindow, settings: Rc<RefCell<AppSettings>
     setup_action.add_css_class("pill");
     setup_action.set_halign(Align::Center);
     {
-        let window = window.clone();
-        let settings = settings.clone();
-        setup_action.connect_clicked(move |_| preferences::present(&window, settings.clone()));
+        let stack = stack.clone();
+        setup_action.connect_clicked(move |_| {
+            stack.set_visible_child_name("settings");
+        });
     }
 
     setup_panel.append(&setup_icon);
@@ -362,6 +439,10 @@ fn build_body(window: &adw::ApplicationWindow, settings: Rc<RefCell<AppSettings>
     let ui = MainWindowUi {
         spinner: spinner.clone(),
         spinner_row: spinner_row.clone(),
+        listening_visual: listening_visual.clone(),
+        waveform_bars: waveform_bars.clone(),
+        waveform_tick: Rc::new(RefCell::new(0)),
+        waveform_source: Rc::new(RefCell::new(None)),
         state_label: state_label.clone(),
         setup_panel: setup_panel.clone(),
         setup_title: setup_title.clone(),
@@ -428,6 +509,7 @@ fn build_body(window: &adw::ApplicationWindow, settings: Rc<RefCell<AppSettings>
     }
 
     outer.append(&spinner_row);
+    outer.append(&listening_visual);
     outer.append(&state_label);
     outer.append(&setup_panel);
     outer.append(&transcript_bubble);

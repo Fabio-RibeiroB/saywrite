@@ -1,4 +1,4 @@
-use std::{env, path::Path};
+use std::{env, path::Path, process::Command};
 
 use crate::{
     config::{preferred_model_path, AppSettings, ProviderMode},
@@ -61,15 +61,33 @@ fn detect_acceleration() -> String {
         return value;
     }
 
-    if let Ok(render) = env::var("DRI_PRIME") {
-        if !render.is_empty() {
-            return "GPU available".into();
-        }
+    if let Some(gpu_name) = detect_gpu_name() {
+        return format!(
+            "GPU detected ({gpu_name}). whisper.cpp decides CPU vs GPU at transcription time."
+        );
     }
 
-    if env::var("NVIDIA_VISIBLE_DEVICES").is_ok() {
-        return "CUDA candidate".into();
+    "No GPU details detected. whisper.cpp will decide CPU or GPU at transcription time.".into()
+}
+
+fn detect_gpu_name() -> Option<String> {
+    let output = Command::new("lspci").output().ok()?;
+    if !output.status.success() {
+        return None;
     }
 
-    "Auto-detect at service start".into()
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| {
+            let lower = line.to_ascii_lowercase();
+            if !lower.contains("vga compatible controller")
+                && !lower.contains("3d controller")
+                && !lower.contains("display controller")
+            {
+                return None;
+            }
+            let (_, value) = line.split_once(':')?;
+            let name = value.trim();
+            (!name.is_empty()).then(|| name.to_string())
+        })
 }

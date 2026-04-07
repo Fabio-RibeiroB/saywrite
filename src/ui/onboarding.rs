@@ -458,7 +458,7 @@ fn test_mic_access() -> Result<bool, String> {
     let test_file = tmp_dir.join("mic-test.wav");
 
     // Record 1.5 seconds of audio
-    let capture_args = build_capture_args(&test_file.display().to_string());
+    let capture_args = build_capture_args(&test_file.display().to_string(), None);
     let status = Command::new("timeout")
         .arg("2")
         .arg("gst-launch-1.0")

@@ -28,7 +28,11 @@ sed "s|Exec=.*|Exec=${BINDIR}/saywrite-host|" \
 chmod 644 "${DBUS_DIR}/io.github.saywrite.Host.service"
 
 systemctl --user daemon-reload
-systemctl --user enable --now saywrite-host.service
+# Do not enable — the GUI starts and stops the daemon on launch/exit.
+# Disable auto-start in case this is a reinstall over an older version.
+systemctl --user disable saywrite-host.service 2>/dev/null || true
+systemctl --user unmask saywrite-host.service 2>/dev/null || true
+systemctl --user start saywrite-host.service
 
 echo
 echo "SayWrite host companion is installed."

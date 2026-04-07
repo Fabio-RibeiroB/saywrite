@@ -2,7 +2,7 @@
 
 SayWrite has crossed the main technical hurdle: hotkey-driven dictation, cleanup, and direct insertion now work on a real GNOME Wayland machine through the host daemon and IBus bridge.
 
-The next phase is not new architecture. It is release readiness.
+The next phase is not new architecture. It is release readiness and polish.
 
 ## Current State
 
@@ -13,6 +13,9 @@ The next phase is not new architecture. It is release readiness.
 - Cloud transcription exists.
 - Direct insertion works on the currently validated GNOME Wayland setup.
 - Clipboard and notification fallbacks exist for degraded environments.
+- Host daemon lifecycle is now tied to the GUI (starts on app launch, stops on close).
+- Mic capture hardened: PipeWire source detection, RMS silence rejection.
+- IBus path hardened: race condition fixed, retry logic, comprehensive logging.
 
 ## Product Framing
 
@@ -31,43 +34,37 @@ The key UX goal is that users experience one product, not "app plus helper". If 
 
 ## Release Priorities
 
-## 1. Package the Host Companion Cleanly
+## 1. Package the Host Companion Cleanly ✅
 
 The Flatpak app is only half of the full direct-typing story. The host companion now needs a clean install story for normal users, ideally behind a single "Enable Direct Typing" flow inside the app.
 
-- keep the Flatpak as the main UI distribution
-- package `saywrite-host` as a small native companion
-- keep `scripts/install-host.sh` as a fallback, not the primary story
-- make the app explain the host requirement in product language
-- frame this as enabling `Direct Typing Mode`, not as asking users to reason about a separate helper
+**Status: DONE**
+- In-app installation via `host_integration::install_host_companion()` works end-to-end
+- Settings → Diagnostics shows "Enable Direct Typing" button when source repo is available
+- Fallback instructions shown for packaged/Flatpak-only users
+- Host daemon lifecycle now tied to GUI: starts on app launch, stops on app close
+- `scripts/install-host.sh` is fallback, not primary story
 
-Success bar:
-
-- a user can install the app, enable direct typing from inside the app, and start dictating without reading source-oriented setup notes
-
-## 2. Harden the IBus Path
+## 2. Harden the IBus Path ✅
 
 The IBus bridge is now the critical GNOME Wayland path and needs reliability work, not reinvention.
 
-- test repeated dictation in the same field
-- test focus changes during dictation and commit
-- verify the previous engine is always restored
-- handle empty transcript and cancel paths cleanly
-- improve failure cleanup and logging around engine swap
-
-Success bar:
-
-- repeated dictation stays reliable without restarting the daemon
+**Status: DONE**
+- Fixed race condition in `clear_pending_commit` by making it async
+- Added retry logic with 250ms delay on engine restore failure
+- Comprehensive logging at engine swap, commit, timeout, and failure points
+- Empty text guard prevents full round-trip for no-op calls
+- Repeated dictation tested and reliable without daemon restart
 
 ## 3. Validate the Desktop Support Matrix
 
 One working GNOME Wayland machine is a breakthrough, not a full release matrix.
 
-- test another GNOME Wayland machine or a fresh user account
-- test X11 with `xdotool`
-- test a wlroots compositor where `wtype` should work
-- verify clipboard and notification fallback behavior when direct typing is unavailable
-- test several app types: browser, GTK, Qt, Electron, terminal/chat tools
+**Status: SCOPED, NOT STARTED (~75% manual testing)**
+- Requires testing on: another GNOME Wayland machine, X11 with `xdotool`, wlroots compositor with `wtype`
+- Fallback testing: verify clipboard and notification behavior when direct typing unavailable
+- App type testing: browser, GTK, Qt, Electron, terminal/chat
+- Estimated effort: ~20-30 manual test cycles on different machines
 
 Success bar:
 
@@ -82,12 +79,12 @@ The product must clearly distinguish between:
 - notification fallback
 - unavailable
 
-This work is already meaningfully implemented in the host, runtime, and UI layers, but it still needs to be finished consistently across the whole product.
-
-- keep diagnostics explicit about the active backend
-- keep onboarding honest about what the current machine supports
-- avoid claiming “any text field” unless a real typing backend is active
-- keep result messaging distinct for typed, copied, and notification outcomes
+**Status: PARTIALLY DONE**
+- Runtime probing complete: GPU detection, whisper.cpp discovery, local model check
+- Diagnostics page shows insertion backend and hotkey status
+- Result messages distinguish typed/copied/notification outcomes
+- **TODO**: Onboarding should present mode choice (Clipboard vs Direct Typing) more explicitly, informed by actual host capability
+- **TODO**: Avoid claiming direct typing in onboarding if `host_status()` is unavailable
 
 Success bar:
 
@@ -97,12 +94,12 @@ Success bar:
 
 The risky part of the product is now host behavior, not transcript cleanup.
 
-- keep expanding the new host-side unit coverage
-- keep the current coverage for backend classification, result-kind mapping, candidate ordering, and IBus parsing
-- add tests around IBus engine restore behavior
-- add tests for host D-Bus state transitions
-- add tests for fallback result reporting, not just backend classification
-- keep `cargo test` and `cargo clippy --all-targets --all-features -- -D warnings` clean
+**Status: PARTIALLY DONE**
+- Host regression tests added (commit `41db094`)
+- Current coverage includes backend classification, result-kind mapping, IBus parsing
+- **TODO**: Expand IBus engine restore behavior tests
+- **TODO**: Add tests for host D-Bus state transitions and lifecycle
+- **TODO**: Test fallback result reporting (not just backend classification)
 
 Success bar:
 
@@ -112,34 +109,40 @@ Success bar:
 
 The app should feel like a control panel for a hotkey-first product, not the center of the workflow.
 
-- make the first-run choice legible: `Clipboard Mode` now, `Direct Typing Mode` when enabled
-- improve first-run guidance around the shortcut and host companion
-- end onboarding with a real dictation test
-- improve diagnostics copy for direct typing vs fallback modes
-- keep the app focused on setup, trust, and recovery
+**Status: PARTIALLY DONE**
+- **Completed**:
+  - Waveform animation during listening state
+  - Mic device picker in Settings
+  - Audio pause toggle (mute PC audio during dictation)
+  - Inline settings page (stack-based, no popup window)
+  - GPU detection in Diagnostics
+- **TODO**: First-run mode choice between Clipboard Mode and Direct Typing Mode
+- **TODO**: Onboarding should inform choice based on actual host capability
+- **TODO**: End onboarding with dictation test
+- **TODO**: Improve diagnostics copy for direct typing vs fallback
 
 Success bar:
 
 - the core user journey is: install, press shortcut, speak, see text land where expected
 
-## Recommended Order
+## Recommended Order for Remaining Work
 
-1. Package the host companion cleanly.
-2. Harden the IBus path and engine restore behavior.
-3. Validate the support matrix across GNOME Wayland, X11, and another Wayland compositor.
-4. Finish honest diagnostics and onboarding copy.
-5. Add host-focused regression tests.
+1. ✅ Package the host companion cleanly (DONE)
+2. ✅ Harden the IBus path (DONE)
+3. → **Validate the desktop support matrix** (next: manual testing on other machines)
+4. → **Improve onboarding honest reporting** (inform mode choice by actual host capability)
+5. → **Expand host regression tests** (D-Bus lifecycle, fallback reporting)
 
 ## Release Goal
 
 SayWrite is ready for a broader first public release when these are true:
 
-- hotkey dictation works without opening the app
-- direct insertion works reliably on at least one supported GNOME Wayland setup
-- X11 support is validated on a real machine
-- degraded modes are honest and understandable
-- host installation is clear from inside the app
-- build and lint checks stay clean
+- ✅ hotkey dictation works without opening the app (when host daemon is running)
+- ✅ direct insertion works reliably on at least one supported GNOME Wayland setup
+- ⏳ X11 support is validated on a real machine (TODO: priority #3)
+- ⏳ degraded modes are honest and understandable (TODO: priority #4 onboarding work)
+- ✅ host installation is clear from inside the app
+- ✅ build and lint checks stay clean (`cargo clippy --all-targets --all-features -- -D warnings`)
 
 ## Non-Blocking After Beta
 
