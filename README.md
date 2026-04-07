@@ -120,10 +120,11 @@ To use local transcription, build and set up `whisper.cpp`:
 Build and install `saywrite-host`:
 
 ```bash
+cargo build --release
 ./scripts/install-host.sh
 ```
 
-This installs the companion daemon and sets up the systemd user service and D-Bus activation.
+The install script requires the release binary at `target/release/saywrite-host`. The `--release` flag is required; a debug build will not satisfy this path. The script installs the companion daemon and sets up the systemd user service and D-Bus activation.
 
 ### GNOME Shortcut (Developer Fallback)
 
