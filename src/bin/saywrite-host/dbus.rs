@@ -7,7 +7,7 @@ use zbus::{dbus_interface, Connection, ConnectionBuilder, SignalContext};
 use saywrite::host_api::{BUS_NAME, OBJECT_PATH};
 
 use crate::{
-    hotkey::HotkeyStatus,
+    input::HotkeyStatus,
     service::{HostService, HostSignalEvent, InsertResponse},
 };
 

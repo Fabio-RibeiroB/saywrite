@@ -3,7 +3,7 @@ use std::{env, process::Command};
 use anyhow::{anyhow, Context, Result};
 use saywrite::host_api;
 
-use crate::ibus;
+use crate::input;
 
 #[derive(Debug, Clone)]
 pub struct InsertionStatus {
@@ -107,9 +107,9 @@ fn backend_name(backend: Backend) -> &'static str {
 }
 
 fn describe_method(backend: Backend) -> String {
-    if ibus::gnome_wayland() {
-        let context = ibus::current_input_context().ok();
-        let engine = ibus::global_engine_name().ok();
+    if input::gnome_wayland() {
+        let context = input::current_input_context().ok();
+        let engine = input::global_engine_name().ok();
         match (context, engine) {
             (Some(context), Some(engine)) => {
                 return format!("{}; ibus:{} @ {}", backend_name(backend), engine, context);
@@ -142,7 +142,7 @@ fn candidate_backends() -> Vec<Backend> {
     let session = env::var("XDG_SESSION_TYPE").unwrap_or_default();
     let mut available = Vec::new();
 
-    if ibus::bridge_ready() {
+    if input::bridge_ready() {
         available.push(Backend::IbusEngine);
     }
     if command_exists("wtype") {
@@ -166,8 +166,8 @@ fn candidate_backends() -> Vec<Backend> {
 
     candidate_backends_for(
         &session,
-        ibus::gnome_wayland(),
-        ibus::bridge_ready(),
+        input::gnome_wayland(),
+        input::bridge_ready(),
         &available,
     )
 }
@@ -215,7 +215,7 @@ fn candidate_backends_for(
 async fn try_backend(backend: Backend, text: &str) -> Result<InsertionOutcome> {
     match backend {
         Backend::IbusEngine => {
-            ibus::commit_text(text).await?;
+            input::commit_text(text).await?;
             Ok(InsertionOutcome {
                 result_kind: result_kind_for_backend(backend).into(),
                 message: "Text committed through the SayWrite IBus engine.".into(),
@@ -239,36 +239,9 @@ async fn try_backend(backend: Backend, text: &str) -> Result<InsertionOutcome> {
                 message: "Text typed with xdotool.".into(),
             })
         }
-        Backend::WlClipboard => {
-            write_clipboard("wl-copy", &[], text)?;
-            notify_transcript(
-                "Transcript copied to the clipboard. Paste it into the focused field.",
-            )?;
-            Ok(InsertionOutcome {
-                result_kind: result_kind_for_backend(backend).into(),
-                message: "Transcript copied to the Wayland clipboard.".into(),
-            })
-        }
-        Backend::Xclip => {
-            write_clipboard("xclip", &["-selection", "clipboard"], text)?;
-            notify_transcript(
-                "Transcript copied to the clipboard. Paste it into the focused field.",
-            )?;
-            Ok(InsertionOutcome {
-                result_kind: result_kind_for_backend(backend).into(),
-                message: "Transcript copied to the X11 clipboard.".into(),
-            })
-        }
-        Backend::Xsel => {
-            write_clipboard("xsel", &["--clipboard", "--input"], text)?;
-            notify_transcript(
-                "Transcript copied to the clipboard. Paste it into the focused field.",
-            )?;
-            Ok(InsertionOutcome {
-                result_kind: result_kind_for_backend(backend).into(),
-                message: "Transcript copied to the clipboard with xsel.".into(),
-            })
-        }
+        Backend::WlClipboard => clipboard_outcome(backend, "wl-copy", &[], text),
+        Backend::Xclip => clipboard_outcome(backend, "xclip", &["-selection", "clipboard"], text),
+        Backend::Xsel => clipboard_outcome(backend, "xsel", &["--clipboard", "--input"], text),
         Backend::NotifySend => {
             notify_transcript(text)?;
             Ok(InsertionOutcome {
@@ -278,6 +251,15 @@ async fn try_backend(backend: Backend, text: &str) -> Result<InsertionOutcome> {
         }
         Backend::Unavailable => Err(anyhow!("no insertion backend is available")),
     }
+}
+
+fn clipboard_outcome(backend: Backend, tool: &str, args: &[&str], text: &str) -> Result<InsertionOutcome> {
+    write_clipboard(tool, args, text)?;
+    let _ = notify_transcript("Transcript copied to the clipboard. Paste it into the focused field.");
+    Ok(InsertionOutcome {
+        result_kind: result_kind_for_backend(backend).into(),
+        message: format!("Transcript copied to the clipboard via {tool}."),
+    })
 }
 
 fn run_command(command: &str, args: &[&str]) -> Result<()> {

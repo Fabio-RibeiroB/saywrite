@@ -594,7 +594,7 @@ fn build_body(
             let text_for_send = text.clone();
             thread::spawn(move || {
                 let result =
-                    host_integration::send_text(&text_for_send, 0.0).map_err(|e| e.to_string());
+                    host_integration::send_text(&text_for_send).map_err(|e| e.to_string());
                 let _ = tx.send(result);
             });
 

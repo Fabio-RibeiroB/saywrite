@@ -1,13 +1,6 @@
-use std::{
-    env,
-    io::{Read, Write},
-    os::unix::net::UnixStream,
-    path::PathBuf,
-    sync::OnceLock,
-};
+use std::sync::OnceLock;
 
 use anyhow::{anyhow, Context, Result};
-use serde::Deserialize;
 
 use crate::host_api;
 
@@ -25,27 +18,12 @@ pub enum HostEvent {
     },
 }
 
-const SOCKET_NAME: &str = "saywrite-host.sock";
 static TOKIO_RUNTIME: OnceLock<std::result::Result<tokio::runtime::Runtime, String>> =
     OnceLock::new();
 
-#[derive(Debug, Deserialize)]
-struct HostResponse {
-    ok: bool,
-    status: Option<String>,
-    error: Option<String>,
-}
-
-/// Try to insert text into the focused app. Attempts D-Bus first, then the
-/// Unix socket fallback, and returns an error if neither works.
-pub fn send_text(text: &str, delay_seconds: f64) -> Result<String> {
-    // Try D-Bus first
-    if let Ok(msg) = send_text_dbus(text) {
-        return Ok(msg);
-    }
-
-    // Fall back to Unix socket
-    send_text_socket(text, delay_seconds)
+/// Insert text into the focused app via the host D-Bus interface.
+pub fn send_text(text: &str) -> Result<String> {
+    send_text_dbus(text)
 }
 
 /// Toggle host-side dictation. This is the primary path for app-driven
@@ -80,18 +58,8 @@ pub fn toggle_dictation() -> Result<String> {
     })
 }
 
-/// Check whether the host daemon is reachable via D-Bus or socket.
+/// Check whether the host daemon is reachable via D-Bus.
 pub fn host_available() -> bool {
-    host_status().is_some() || host_socket_present()
-}
-
-/// Check if the Unix socket fallback exists.
-pub fn host_socket_present() -> bool {
-    socket_path().is_some_and(|path| path.exists())
-}
-
-/// Check if the host D-Bus service is available on the session bus.
-pub fn host_dbus_available() -> bool {
     host_status().is_some()
 }
 
@@ -166,60 +134,6 @@ fn send_text_dbus(text: &str) -> Result<String> {
     })
 }
 
-fn send_text_socket(text: &str, delay_seconds: f64) -> Result<String> {
-    let path = socket_path().ok_or_else(|| {
-        anyhow!("Host integration is not running. No private runtime directory is available.")
-    })?;
-    if !path.exists() {
-        return Err(anyhow!(
-            "Host integration is not running. Text was not delivered."
-        ));
-    }
-
-    let payload = serde_json::json!({
-        "action": "insert_text",
-        "text": text,
-        "delay_seconds": delay_seconds,
-    })
-    .to_string();
-
-    let mut socket = UnixStream::connect(&path).with_context(|| {
-        format!(
-            "failed to connect to host integration at {}",
-            path.display()
-        )
-    })?;
-    socket
-        .write_all(payload.as_bytes())
-        .context("failed to send insertion request")?;
-    socket
-        .shutdown(std::net::Shutdown::Write)
-        .context("failed to finalize insertion request")?;
-
-    let mut response = Vec::new();
-    socket
-        .read_to_end(&mut response)
-        .context("failed to read insertion response")?;
-    let message: HostResponse =
-        serde_json::from_slice(&response).context("invalid host integration response")?;
-
-    if message.ok {
-        return Ok(message.status.unwrap_or_else(|| "Text delivered.".into()));
-    }
-
-    Err(anyhow!(
-        "{}",
-        message
-            .error
-            .unwrap_or_else(|| "unknown host integration error".into())
-    ))
-}
-
-fn socket_path() -> Option<PathBuf> {
-    env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .map(|dir| dir.join(SOCKET_NAME))
-}
 
 /// Subscribe to D-Bus signals from the host daemon.
 /// Returns an mpsc receiver that delivers `HostEvent`s.
