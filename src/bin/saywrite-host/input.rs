@@ -764,7 +764,6 @@ pub async fn register_and_listen() -> Result<()> {
     Ok(())
 }
 
-
 fn portal_request_path(conn: &Connection, token: &str) -> Result<String> {
     let unique_name = conn
         .unique_name()
@@ -925,13 +924,6 @@ fn portal_interface_available() -> bool {
         .output()
         .map(|r| r.status.success() && String::from_utf8_lossy(&r.stdout).contains("org.freedesktop.portal.GlobalShortcuts"))
         .unwrap_or(false)
-}
-
-fn gnome_shortcuts_supported() -> bool {
-    let current = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
-    current
-        .split(':')
-        .any(|part| part.eq_ignore_ascii_case("gnome"))
 }
 
 fn custom_shortcut_hint(shortcut: &str) -> String {
