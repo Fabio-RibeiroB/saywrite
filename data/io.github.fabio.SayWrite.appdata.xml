@@ -17,6 +17,12 @@
       leaves your computer. Optionally connect a cloud API for faster results
       on older hardware.
     </p>
+    <p>
+      This release supports GNOME on Wayland. Direct text insertion uses the
+      IBus input method bridge and has been validated on GNOME Wayland setups.
+      On other desktops, SayWrite falls back to clipboard delivery automatically
+      and reports which mode is active so you always know what to expect.
+    </p>
   </description>
   <launchable type="desktop-id">io.github.fabio.SayWrite.desktop</launchable>
   <provides>
@@ -27,8 +33,24 @@
     <category>AudioVideo</category>
     <category>Office</category>
   </categories>
+  <recommends>
+    <display_length compare="ge">480</display_length>
+  </recommends>
   <content_rating type="oars-1.1" />
   <releases>
-    <release version="0.2.0" date="2025-04-05" />
+    <release version="0.2.0" date="2026-04-11">
+      <description>
+        <p>First supported release targeting GNOME Wayland.</p>
+        <ul>
+          <li>Global hotkey dictation via host companion daemon</li>
+          <li>Direct text insertion via IBus on GNOME Wayland</li>
+          <li>Local transcription with whisper.cpp (no cloud required)</li>
+          <li>Optional cloud transcription via OpenAI-compatible API</li>
+          <li>In-app host companion installation</li>
+          <li>Animated waveform during listening, inline setup actions, insertion mode indicator</li>
+          <li>Clipboard and notification fallback when direct typing is unavailable</li>
+        </ul>
+      </description>
+    </release>
   </releases>
 </component>

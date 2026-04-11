@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 target/
 saywrite.gresource
+
+vendor/cargo/
+build-dir/
+.flatpak-builder/

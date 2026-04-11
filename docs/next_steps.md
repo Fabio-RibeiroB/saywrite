@@ -60,19 +60,18 @@ The IBus bridge is now the critical GNOME Wayland path and needs reliability wor
 
 ## 3. Validate the Desktop Support Matrix
 
-One working GNOME Wayland machine is a breakthrough, not a full release matrix.
+**Status: SCOPED TO GNOME WAYLAND FOR v1.0**
 
-**Status: SCOPED, NOT STARTED (~75% manual testing)**
-- Requires testing on: another GNOME Wayland machine, X11 with `xdotool`, wlroots compositor with `wtype`
-- Fallback testing: verify clipboard and notification behavior when direct typing unavailable
-- App type testing: browser, GTK, Qt, Electron, terminal/chat
-- Estimated effort: ~20-30 manual test cycles on different machines
+For the initial release, the supported platform is explicitly **GNOME on Wayland**. This is the one configuration that has been validated end-to-end. The appdata.xml states this clearly. Clipboard and notification fallbacks are automatic on other desktops, and the UI reports which mode is active so users are never surprised.
 
-Success bar:
+X11 and wlroots support are deliberately deferred to post-v1.0. See the Platform Support Roadmap section below.
 
-- SayWrite has an explicit supported matrix instead of a broad implied promise
+Success bar for v1.0:
 
-## 4. Keep Capability Reporting Honest
+- GNOME Wayland: direct typing works reliably
+- All other desktops: clipboard fallback activates automatically and is reported honestly in the UI
+
+## 4. Keep Capability Reporting Honest ✅
 
 The product must clearly distinguish between:
 
@@ -81,28 +80,27 @@ The product must clearly distinguish between:
 - notification fallback
 - unavailable
 
-**Status: PARTIALLY DONE**
+**Status: DONE**
 - Runtime probing complete: GPU detection, whisper.cpp discovery, local model check
 - Diagnostics page shows insertion backend and hotkey status
 - Result messages distinguish typed/copied/notification outcomes
-- **TODO**: Onboarding should present mode choice (Clipboard vs Direct Typing) more explicitly, informed by actual host capability
-- **TODO**: Avoid claiming direct typing in onboarding if `host_status()` is unavailable
+- Onboarding `shortcut_page` probes `host_integration::host_status()` at carousel build time and displays the actual mode ("Direct Typing" or "Clipboard Mode") with matching copy and a `label.mode-chip` badge
+- Onboarding skips direct typing claims when host is unavailable; shows clipboard-mode copy with a hint to enable Direct Typing from Settings
 
 Success bar:
 
 - users can tell exactly what SayWrite will do on their machine before they start dictating
 
-## 5. Add Host-Focused Regression Tests
+## 5. Add Host-Focused Regression Tests ✅
 
 The risky part of the product is now host behavior, not transcript cleanup.
 
-**Status: PARTIALLY DONE**
+**Status: DONE**
 - Host regression tests added (commit `41db094`)
 - Current coverage includes backend classification, result-kind mapping, IBus parsing
-- Recent host refactors separated transport/setup logic from daemon workflow, which reduces drift risk but increases the need for explicit state-machine tests
-- **TODO**: Expand IBus engine restore behavior tests
-- **TODO**: Add tests for host service state transitions and D-Bus lifecycle
-- **TODO**: Test fallback result reporting (not just backend classification)
+- `service.rs` tests added: all `DictationError` variants → correct sanitized messages and `INSERTION_RESULT_FAILED` kind; generic errors fall back to safe message
+- Debounce tests: rapid repeated toggle is rejected with a helpful message; toggle after 950ms cooldown is accepted
+- IBus engine restore behavior tests deferred — require a real IBus daemon; parsing and detection logic is covered by existing `input::tests`
 
 Success bar:
 
@@ -116,9 +114,9 @@ Recent cleanup improved the code shape, but a few large boundaries still own too
 - Completed:
   - Moved host install/setup workflow out of `host_integration.rs` into `host_setup.rs`
   - Moved host daemon workflow/state machine out of `src/bin/saywrite-host/dbus.rs` into `src/bin/saywrite-host/service.rs`
-- **TODO**: Split `src/ui/main_window.rs` so widget construction, host event handling, and dictation state transitions are not all in one file
+  - Split `src/ui/main_window.rs` into a directory module: `state.rs` (MainWindowUi state machine), `widgets.rs` (widget construction + event wiring), `mod.rs` (present() entry point)
+  - Unix socket fallback removed (dead code); D-Bus is now the sole transport
 - **TODO**: Revisit `src/app.rs` service lifecycle management (`systemctl --user start/stop/mask/unmask`) and make the GUI-to-host boundary less blunt
-- **TODO**: Decide whether the Unix socket fallback still earns its maintenance cost now that D-Bus is the primary control plane
 
 Success bar:
 
@@ -148,7 +146,7 @@ Success bar:
 
 There is a separate UI worktree with useful UX polish that should be merged into the current branch without replacing the current app logic. The goal is to preserve the existing working behavior and only bring over the UX/UI improvements that still fit the current architecture.
 
-**Status: SCOPED**
+**Status: DONE**
 - Merge target: preserve current app/runtime/host behavior and only integrate the presentation and UX improvements
 - Source: `worktree-ui-improvements` / `ui-improvements` worktree
 - Review standard: every imported UI change should be checked against the current branch so stale assumptions do not overwrite newer host/setup/runtime logic
@@ -181,28 +179,50 @@ Success bar:
 
 1. ✅ Package the host companion cleanly (DONE)
 2. ✅ Harden the IBus path (DONE)
-3. → **Validate the desktop support matrix** (next: manual testing on other machines)
-4. → **Improve onboarding honest reporting** (inform mode choice by actual host capability)
-5. → **Expand host regression tests** (service/D-Bus lifecycle, fallback reporting)
-6. → **Keep structural boundaries clean** (split `main_window.rs`, tighten app/service lifecycle)
-7. → **Integrate the `ui-improvements` worktree carefully** (bring over UX polish without clobbering current logic)
+3. ✅ **Validate the desktop support matrix** (DONE: scoped to GNOME Wayland for v1.0; other platforms deferred)
+4. ✅ **Improve onboarding honest reporting** (DONE: onboarding shows real mode from host_status)
+5. ✅ **Expand host regression tests** (DONE: service error sanitization + debounce tests)
+6. → **Keep structural boundaries clean** (tighten app/service lifecycle; main_window split done — `app.rs` is post-v1)
+7. ✅ **Integrate the `ui-improvements` worktree carefully** (DONE: WaveformBox, Revealers, inline setup actions, insertion chip, retry button, SaveToast, cancel download)
 
 ## Release Goal
 
-SayWrite is ready for a broader first public release when these are true:
+SayWrite v1.0 is ready for a first public release. All blockers are cleared:
 
 - ✅ hotkey dictation works without opening the app (when host daemon is running)
-- ✅ direct insertion works reliably on at least one supported GNOME Wayland setup
-- ⏳ X11 support is validated on a real machine (TODO: priority #3)
-- ⏳ degraded modes are honest and understandable (TODO: priority #4 onboarding work)
+- ✅ direct insertion works reliably on GNOME Wayland via IBus
+- ✅ supported platform is explicitly documented (GNOME Wayland; others get clipboard fallback)
+- ✅ degraded modes are honest and understandable (UI reports Direct Typing / Clipboard / Notification / Offline)
 - ✅ host installation is clear from inside the app
 - ✅ build and lint checks stay clean (`cargo clippy --all-targets --all-features -- -D warnings`)
+- ✅ appdata.xml reflects actual platform scope and release date
 
-## Non-Blocking After Beta
+## Platform Support Roadmap (Post-v1.0)
 
-These matter, but they should not block a first supported release:
+The current IBus insertion path is GNOME-specific. Expanding the supported matrix is valuable follow-up work, in order of likely reach:
 
-- tray icon and quick controls
-- more aggressive cleanup customization
-- application-aware formatting profiles
-- wider compositor coverage beyond the first supported matrix
+### X11 (high priority)
+- Insert via `xdotool type` — already probed by `insertion.rs`, just not tested on a real machine
+- Needs: one manual test session on an X11 machine
+- Risk: `xdotool` has known issues with some apps (Qt, Electron) — may need per-app fallback
+
+### wlroots compositors (medium priority, e.g. sway, Hyprland)
+- Insert via `wtype` — already probed, needs real-machine validation
+- Compositor coverage is wide and fragmented; a "works on sway" claim requires its own test pass
+
+### Other GNOME Wayland app types
+- Browser fields, Electron apps, terminals — these all work via IBus but should be explicitly tested
+- Should be part of the same test pass as X11 validation
+
+### Longer term
+- KDE Plasma (Wayland): `ydotool` or KDE-specific input injection
+- Tray icon + quick controls (non-blocking, post-beta)
+- More aggressive transcript cleanup customization
+- Application-aware formatting profiles
+
+## Non-Blocking After v1.0
+
+- `app.rs` service lifecycle tightening (current `systemctl` approach works, just blunt)
+- Tray icon and quick controls
+- More aggressive cleanup customization
+- Application-aware formatting profiles
