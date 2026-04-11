@@ -1,5 +1,15 @@
 use libadwaita as adw;
-use std::{cell::RefCell, rc::Rc, sync::mpsc, thread, time::Duration};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+        Arc,
+    },
+    thread,
+    time::{Duration, Instant},
+};
 
 use adw::prelude::*;
 use gtk::{glib, Align, Orientation};
@@ -101,6 +111,14 @@ fn mic_page(carousel: adw::Carousel) -> gtk::Box {
     status_label.add_css_class("caption");
     status_label.set_margin_top(8);
 
+    let recording_label = gtk::Label::new(None);
+    recording_label.add_css_class("caption");
+    recording_label.set_visible(false);
+
+    let recording_progress = gtk::ProgressBar::new();
+    recording_progress.set_show_text(false);
+    recording_progress.set_visible(false);
+
     let test_btn = gtk::Button::with_label("Test Microphone");
     test_btn.add_css_class("suggested-action");
     test_btn.add_css_class("pill");
@@ -116,10 +134,26 @@ fn mic_page(carousel: adw::Carousel) -> gtk::Box {
         let status_label = status_label.clone();
         let test_btn = test_btn.clone();
         let continue_btn = continue_btn.clone();
+        let recording_progress = recording_progress.clone();
+        let recording_label = recording_label.clone();
 
         test_btn.connect_clicked(move |btn| {
             btn.set_sensitive(false);
             status_label.set_label("Recording a short sample\u{2026}");
+            recording_label.set_label("Recording…");
+            recording_label.set_visible(true);
+            recording_progress.set_visible(true);
+
+            let pulse_id = Rc::new(RefCell::new(Some(glib::timeout_add_local(
+                Duration::from_millis(100),
+                {
+                    let recording_progress = recording_progress.clone();
+                    move || {
+                        recording_progress.pulse();
+                        glib::ControlFlow::Continue
+                    }
+                },
+            ))));
 
             let (tx, rx) = mpsc::channel::<Result<bool, String>>();
             thread::spawn(move || {
@@ -132,21 +166,32 @@ fn mic_page(carousel: adw::Carousel) -> gtk::Box {
             let continue_btn = continue_btn.clone();
             let status_label_on_disconnect = status_label.clone();
             let test_btn_on_disconnect = test_btn.clone();
+            let recording_progress_on_disconnect = recording_progress.clone();
+            let recording_label_on_disconnect = recording_label.clone();
+            let pulse_id_on_disconnect = pulse_id.clone();
+            let recording_progress_for_value = recording_progress.clone();
+            let recording_label_for_value = recording_label.clone();
 
             async_poll::poll_receiver(
                 rx,
                 Duration::from_millis(100),
                 move |result| {
+                    if let Some(source_id) = pulse_id.borrow_mut().take() {
+                        source_id.remove();
+                    }
+                    recording_progress_for_value.set_visible(false);
                     match result {
                         Ok(true) => {
                             status_label.set_label("Microphone is working!");
                             status_label.add_css_class("success");
+                            recording_label_for_value.set_label("Done!");
                             test_btn.set_visible(false);
                             continue_btn.set_visible(true);
                         }
                         Ok(false) | Err(_) => {
                             status_label
                                 .set_label("Could not detect audio. Check your mic and try again.");
+                            recording_label_for_value.set_label("No usable audio detected");
                             test_btn.set_sensitive(true);
                             test_btn.set_label("Try Again");
                         }
@@ -154,6 +199,12 @@ fn mic_page(carousel: adw::Carousel) -> gtk::Box {
                     glib::ControlFlow::Break
                 },
                 move || {
+                    if let Some(source_id) = pulse_id_on_disconnect.borrow_mut().take() {
+                        source_id.remove();
+                    }
+                    recording_progress_on_disconnect.set_visible(false);
+                    recording_label_on_disconnect.set_label("Mic test stopped");
+                    recording_label_on_disconnect.set_visible(true);
                     status_label_on_disconnect.set_label("Mic test failed unexpectedly.");
                     test_btn_on_disconnect.set_sensitive(true);
                     glib::ControlFlow::Break
@@ -174,6 +225,8 @@ fn mic_page(carousel: adw::Carousel) -> gtk::Box {
     box_.append(&title);
     box_.append(&body);
     box_.append(&test_btn);
+    box_.append(&recording_progress);
+    box_.append(&recording_label);
     box_.append(&status_label);
     box_.append(&continue_btn);
     box_
@@ -289,16 +342,25 @@ where
     progress_bar.set_visible(false);
     progress_bar.set_margin_top(4);
 
+    let cancel_btn = gtk::Button::with_label("Cancel");
+    cancel_btn.add_css_class("pill");
+    cancel_btn.set_halign(Align::Center);
+    cancel_btn.set_visible(false);
+
     let finish_btn = gtk::Button::with_label("Open SayWrite");
     finish_btn.add_css_class("suggested-action");
     finish_btn.add_css_class("pill");
     finish_btn.set_halign(Align::Center);
+
+    let cancel_requested = Arc::new(AtomicBool::new(false));
 
     {
         let settings_click = settings.clone();
         let progress_label = progress_label.clone();
         let progress_bar = progress_bar.clone();
         let finish_btn = finish_btn.clone();
+        let cancel_btn = cancel_btn.clone();
+        let cancel_requested = cancel_requested.clone();
         let on_complete = Rc::new(on_complete);
 
         finish_btn.connect_clicked(move |btn| {
@@ -321,24 +383,37 @@ where
             btn.set_label("Downloading model\u{2026}");
             progress_bar.set_visible(true);
             progress_label.set_label("Starting download\u{2026}");
+            cancel_btn.set_visible(true);
+            cancel_btn.set_sensitive(true);
+            cancel_requested.store(false, Ordering::Relaxed);
 
             let (tx, rx) = mpsc::channel::<Result<DownloadMsg, String>>();
+            let cancel_flag = cancel_requested.clone();
 
             thread::spawn(move || {
-                let result = model_installer::download_default_model(|progress| {
-                    let pct = progress
-                        .total_bytes
-                        .map(|total| progress.bytes_downloaded as f64 / total as f64);
-                    let label = match progress.total_bytes {
-                        Some(total) => format!(
-                            "{} / {}",
-                            model_installer::format_bytes(progress.bytes_downloaded),
-                            model_installer::format_bytes(total),
-                        ),
-                        None => model_installer::format_bytes(progress.bytes_downloaded),
-                    };
-                    let _ = tx.send(Ok(DownloadMsg::Progress { pct, label }));
-                });
+                let result = model_installer::download_model_cancellable(
+                    crate::config::ModelSize::Base,
+                    |progress| {
+                        let pct = progress
+                            .total_bytes
+                            .map(|total| progress.bytes_downloaded as f64 / total as f64);
+                        let label = match progress.total_bytes {
+                            Some(total) => format!(
+                                "{} / {}",
+                                model_installer::format_bytes(progress.bytes_downloaded),
+                                model_installer::format_bytes(total),
+                            ),
+                            None => model_installer::format_bytes(progress.bytes_downloaded),
+                        };
+                        let _ = tx.send(Ok(DownloadMsg::Progress {
+                            pct,
+                            label,
+                            bytes_downloaded: progress.bytes_downloaded,
+                            total_bytes: progress.total_bytes,
+                        }));
+                    },
+                    || cancel_flag.load(Ordering::Relaxed),
+                );
                 match result {
                     Ok(_) => {
                         let _ = tx.send(Ok(DownloadMsg::Done));
@@ -352,19 +427,40 @@ where
             let progress_label = progress_label.clone();
             let progress_bar = progress_bar.clone();
             let finish_btn = btn.clone();
+            let cancel_btn = cancel_btn.clone();
             let on_complete = on_complete.clone();
             let settings_for_save = settings_click.clone();
             let progress_label_on_disconnect = progress_label.clone();
             let progress_bar_on_disconnect = progress_bar.clone();
             let finish_btn_on_disconnect = finish_btn.clone();
+            let cancel_btn_on_disconnect = cancel_btn.clone();
+            let started_at = Instant::now();
 
             async_poll::poll_receiver(
                 rx,
                 Duration::from_millis(100),
                 move |result| {
                     match result {
-                        Ok(DownloadMsg::Progress { pct, label }) => {
-                            progress_label.set_label(&label);
+                        Ok(DownloadMsg::Progress {
+                            pct,
+                            label,
+                            bytes_downloaded,
+                            total_bytes,
+                        }) => {
+                            let elapsed = started_at.elapsed().as_secs_f64().max(1.0);
+                            let speed = bytes_downloaded as f64 / elapsed;
+                            let eta_label = total_bytes.and_then(|total| {
+                                if speed > 0.0 && total > bytes_downloaded {
+                                    let remaining = (total - bytes_downloaded) as f64 / speed;
+                                    Some(format!("about {}s left", remaining.ceil() as u64))
+                                } else {
+                                    None
+                                }
+                            });
+                            progress_label.set_label(&match eta_label {
+                                Some(eta) => format!("{label} • {eta}"),
+                                None => label,
+                            });
                             if let Some(fraction) = pct {
                                 progress_bar.set_fraction(fraction);
                             } else {
@@ -375,6 +471,7 @@ where
                         Ok(DownloadMsg::Done) => {
                             progress_bar.set_fraction(1.0);
                             progress_label.set_label("Model ready!");
+                            cancel_btn.set_visible(false);
                             {
                                 let mut state = settings_for_save.borrow_mut();
                                 state.local_model_path = Some(crate::config::default_model_path());
@@ -384,7 +481,12 @@ where
                         }
                         Err(err) => {
                             progress_bar.set_visible(false);
-                            progress_label.set_label(&format!("Download failed: {err}"));
+                            cancel_btn.set_visible(false);
+                            if err.contains("download canceled") {
+                                progress_label.set_label("Download canceled");
+                            } else {
+                                progress_label.set_label(&format!("Download failed: {err}"));
+                            }
                             finish_btn.set_sensitive(true);
                             finish_btn.set_label("Try Again");
                             model_installer::cleanup_partial();
@@ -394,6 +496,7 @@ where
                 },
                 move || {
                     progress_bar_on_disconnect.set_visible(false);
+                    cancel_btn_on_disconnect.set_visible(false);
                     progress_label_on_disconnect.set_label("Download failed unexpectedly.");
                     finish_btn_on_disconnect.set_sensitive(true);
                     finish_btn_on_disconnect.set_label("Try Again");
@@ -404,18 +507,41 @@ where
         });
     }
 
+    {
+        let progress_label = progress_label.clone();
+        let progress_bar = progress_bar.clone();
+        let finish_btn = finish_btn.clone();
+        let cancel_btn = cancel_btn.clone();
+        let cancel_requested = cancel_requested.clone();
+        cancel_btn.clone().connect_clicked(move |_| {
+            cancel_requested.store(true, Ordering::Relaxed);
+            progress_label.set_label("Canceling download…");
+            progress_bar.set_visible(false);
+            cancel_btn.set_sensitive(false);
+            finish_btn.set_sensitive(true);
+            finish_btn.set_label("Try Again");
+            model_installer::cleanup_partial();
+        });
+    }
+
     box_.append(&icon);
     box_.append(&title);
     box_.append(&local_card);
     box_.append(&cloud_card);
     box_.append(&progress_bar);
     box_.append(&progress_label);
+    box_.append(&cancel_btn);
     box_.append(&finish_btn);
     box_
 }
 
 enum DownloadMsg {
-    Progress { pct: Option<f64>, label: String },
+    Progress {
+        pct: Option<f64>,
+        label: String,
+        bytes_downloaded: u64,
+        total_bytes: Option<u64>,
+    },
     Done,
 }
 

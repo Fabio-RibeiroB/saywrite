@@ -12,6 +12,11 @@ window {
   padding: 2px 8px;
 }
 
+.insertion-chip {
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
 /* State label */
 .state-label {
   font-size: 0.88rem;
@@ -43,6 +48,18 @@ window {
   color: @window_fg_color;
 }
 
+.transcript-textview {
+  padding: 0;
+  background: transparent;
+  color: @window_fg_color;
+  font-size: 1.08rem;
+  line-height: 1.5;
+}
+
+.transcript-textview text {
+  background: transparent;
+}
+
 /* Record button */
 .record-button {
   font-size: 1rem;
@@ -62,6 +79,24 @@ window {
   color: @dim_label_color;
   font-size: 0.82rem;
   font-weight: 600;
+}
+
+.notification-toast {
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: alpha(@accent_bg_color, 0.18);
+  color: @window_fg_color;
+  font-weight: 700;
+}
+
+.waveform-bar {
+  min-width: 10px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to bottom,
+    alpha(@accent_bg_color, 0.90),
+    alpha(@accent_bg_color, 0.45)
+  );
 }
 
 /* Onboarding */

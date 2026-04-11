@@ -56,6 +56,19 @@ pub fn download_model<F>(size: ModelSize, on_progress: F) -> Result<PathBuf>
 where
     F: Fn(DownloadProgress),
 {
+    download_model_cancellable(size, on_progress, || false)
+}
+
+/// Download a whisper model and allow the caller to cancel while bytes stream in.
+pub fn download_model_cancellable<F, C>(
+    size: ModelSize,
+    on_progress: F,
+    should_cancel: C,
+) -> Result<PathBuf>
+where
+    F: Fn(DownloadProgress),
+    C: Fn() -> bool,
+{
     let dest = model_path_for_size(size);
     if model_exists_for_size(size) {
         return Ok(dest);
@@ -116,6 +129,9 @@ where
     let mut downloaded: u64 = if is_resume { existing_size } else { 0 };
 
     loop {
+        if should_cancel() {
+            return Err(anyhow!("download canceled"));
+        }
         let n = reader.read(&mut buf).context("download interrupted")?;
         if n == 0 {
             break;

@@ -13,6 +13,52 @@ use crate::{
 
 const SETTINGS_SAVE_DEBOUNCE_MS: u64 = 300;
 
+#[derive(Clone)]
+struct SaveToast {
+    revealer: gtk::Revealer,
+    label: gtk::Label,
+    pending_hide: Rc<RefCell<Option<glib::SourceId>>>,
+}
+
+impl SaveToast {
+    fn new() -> Self {
+        let label = gtk::Label::new(Some("Settings saved"));
+        label.add_css_class("notification-toast");
+
+        let revealer = gtk::Revealer::new();
+        revealer.set_transition_type(gtk::RevealerTransitionType::Crossfade);
+        revealer.set_transition_duration(200);
+        revealer.set_reveal_child(false);
+        revealer.set_child(Some(&label));
+
+        Self {
+            revealer,
+            label,
+            pending_hide: Rc::new(RefCell::new(None)),
+        }
+    }
+
+    fn widget(&self) -> gtk::Revealer {
+        self.revealer.clone()
+    }
+
+    fn show(&self, message: &str) {
+        self.label.set_label(message);
+        self.revealer.set_reveal_child(true);
+        if let Some(source_id) = self.pending_hide.borrow_mut().take() {
+            source_id.remove();
+        }
+        let revealer = self.revealer.clone();
+        let pending_hide = self.pending_hide.clone();
+        let source_id = glib::timeout_add_local(Duration::from_secs(2), move || {
+            revealer.set_reveal_child(false);
+            pending_hide.borrow_mut().take();
+            glib::ControlFlow::Break
+        });
+        *self.pending_hide.borrow_mut() = Some(source_id);
+    }
+}
+
 pub fn present(parent: &adw::ApplicationWindow, settings: Rc<RefCell<AppSettings>>) {
     let prefs = adw::PreferencesWindow::builder()
         .transient_for(parent)
@@ -31,10 +77,15 @@ pub fn present(parent: &adw::ApplicationWindow, settings: Rc<RefCell<AppSettings
 
 fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage {
     let pending_save: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+    let save_toast = SaveToast::new();
     let page = adw::PreferencesPage::builder()
         .title("Engine")
         .icon_name("preferences-system-symbolic")
         .build();
+
+    let toast_group = adw::PreferencesGroup::new();
+    toast_group.add(&save_toast.widget());
+    page.add(&toast_group);
 
     let mode_group = adw::PreferencesGroup::builder()
         .title("Transcription Mode")
@@ -81,12 +132,13 @@ fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage
     {
         let settings = settings.clone();
         let pending_save = pending_save.clone();
+        let save_toast = save_toast.clone();
         model_row.connect_changed(move |row| {
             let mut state = settings.borrow_mut();
             let value = row.text().trim().to_string();
             state.local_model_path = (!value.is_empty()).then(|| value.into());
             drop(state);
-            schedule_settings_save(&settings, &pending_save);
+            schedule_settings_save(&settings, &pending_save, Some(&save_toast));
         });
     }
     local_group.add(&model_row);
@@ -257,11 +309,12 @@ fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage
     {
         let settings = settings.clone();
         let pending_save = pending_save.clone();
+        let save_toast = save_toast.clone();
         base_row.connect_changed(move |row| {
             let mut state = settings.borrow_mut();
             state.cloud_api_base = row.text().to_string();
             drop(state);
-            schedule_settings_save(&settings, &pending_save);
+            schedule_settings_save(&settings, &pending_save, Some(&save_toast));
         });
     }
     cloud_group.add(&base_row);
@@ -273,11 +326,12 @@ fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage
     {
         let settings = settings.clone();
         let pending_save = pending_save.clone();
+        let save_toast = save_toast.clone();
         key_row.connect_changed(move |row| {
             let mut state = settings.borrow_mut();
             state.cloud_api_key = row.text().to_string();
             drop(state);
-            schedule_settings_save(&settings, &pending_save);
+            schedule_settings_save(&settings, &pending_save, Some(&save_toast));
         });
     }
     cloud_group.add(&key_row);
@@ -535,6 +589,7 @@ fn build_probe_group(title: &str, probe: &RuntimeProbe) -> adw::PreferencesGroup
 fn schedule_settings_save(
     settings: &Rc<RefCell<AppSettings>>,
     pending_save: &Rc<RefCell<Option<glib::SourceId>>>,
+    save_toast: Option<&SaveToast>,
 ) {
     if let Some(source_id) = pending_save.borrow_mut().take() {
         source_id.remove();
@@ -542,10 +597,14 @@ fn schedule_settings_save(
 
     let settings = settings.clone();
     let pending_save_for_closure = pending_save.clone();
+    let save_toast = save_toast.cloned();
     let source_id = glib::timeout_add_local(
         Duration::from_millis(SETTINGS_SAVE_DEBOUNCE_MS),
         move || {
             let _ = settings.borrow().save();
+            if let Some(save_toast) = save_toast.as_ref() {
+                save_toast.show("Settings saved");
+            }
             pending_save_for_closure.borrow_mut().take();
             glib::ControlFlow::Break
         },
