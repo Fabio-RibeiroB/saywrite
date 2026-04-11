@@ -6,10 +6,23 @@ window {
   color: @window_fg_color;
 }
 
-/* Header mode chip */
+/* Header mode chip (button) and onboarding mode chip (label) */
 .mode-chip {
   border-radius: 999px;
+  padding: 2px 10px;
+}
+
+.insertion-chip {
+  border-radius: 999px;
   padding: 2px 8px;
+}
+
+label.mode-chip {
+  background: alpha(@card_bg_color, 0.80);
+  border: 1px solid alpha(@window_fg_color, 0.12);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: @accent_color;
 }
 
 /* State label */
@@ -56,6 +69,26 @@ window {
   font-size: 1.08rem;
   line-height: 1.5;
   color: @window_fg_color;
+}
+
+.transcript-textview {
+  padding: 0;
+  background: transparent;
+  color: @window_fg_color;
+  font-size: 1.08rem;
+  line-height: 1.5;
+}
+
+.transcript-textview text {
+  background: transparent;
+}
+
+.notification-toast {
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: alpha(@accent_bg_color, 0.18);
+  color: @window_fg_color;
+  font-weight: 700;
 }
 
 /* Record button */
