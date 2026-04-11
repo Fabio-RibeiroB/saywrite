@@ -232,9 +232,17 @@ pub fn discover_whisper_cli() -> PathBuf {
         return PathBuf::from(path);
     }
 
-    // Flatpak installs to /app/bin; check there first, then dev paths.
+    // Check user-local install (placed there by install-host.sh).
+    let user_local = dirs::home_dir()
+        .map(|h| h.join(".local/bin/whisper-cli"))
+        .unwrap_or_else(|| PathBuf::from("whisper-cli"));
+
     let candidates = [
+        // User-local install — the primary path for installed deployments.
+        user_local,
+        // Inside the Flatpak sandbox — accessible to the Flatpak app itself.
         PathBuf::from("/app/bin/whisper-cli"),
+        // Development source tree paths, baked in at compile time.
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("vendor/whisper.cpp/build/bin/whisper-cli"),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("vendor/whisper.cpp/build/bin/main"),
     ];

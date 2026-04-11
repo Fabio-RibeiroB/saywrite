@@ -1,7 +1,7 @@
 {
   "app-id": "io.github.fabio.SayWrite",
   "runtime": "org.gnome.Platform",
-  "runtime-version": "46",
+  "runtime-version": "48",
   "sdk": "org.gnome.Sdk",
   "sdk-extensions": ["org.freedesktop.Sdk.Extension.rust-stable"],
   "command": "saywrite",
@@ -13,10 +13,15 @@
     "--device=dri",
     "--share=network",
     "--talk-name=org.freedesktop.portal.Desktop",
+    "--talk-name=org.freedesktop.Flatpak",
     "--talk-name=io.github.saywrite.Host"
   ],
   "build-options": {
-    "append-path": "/usr/lib/sdk/rust-stable/bin"
+    "append-path": "/usr/lib/sdk/rust-stable/bin",
+    "env": {
+      "CARGO_HOME": "/run/build/saywrite/cargo-home",
+      "RUSTFLAGS": ""
+    }
   },
   "modules": [
     {
@@ -42,9 +47,19 @@
     {
       "name": "saywrite",
       "buildsystem": "simple",
+      "build-options": {
+        "env": {
+          "HOME": "/run/build/saywrite"
+        }
+      },
       "build-commands": [
-        "cargo --offline --locked build --release || cargo build --release",
+        "cargo build --release --offline --locked --bin saywrite --bin saywrite-host",
         "install -Dm755 target/release/saywrite /app/bin/saywrite",
+        "install -Dm755 target/release/saywrite-host /app/libexec/saywrite-host",
+        "install -Dm755 scripts/install-host.sh /app/share/saywrite/install-host.sh",
+        "install -Dm755 scripts/install-gnome-shortcut.sh /app/share/saywrite/install-gnome-shortcut.sh",
+        "install -Dm644 data/saywrite-host.service /app/share/saywrite/saywrite-host.service",
+        "install -Dm644 data/io.github.saywrite.Host.service /app/share/saywrite/io.github.saywrite.Host.service",
         "install -Dm644 data/io.github.fabio.SayWrite.desktop /app/share/applications/io.github.fabio.SayWrite.desktop",
         "install -Dm644 data/io.github.fabio.SayWrite.appdata.xml /app/share/metainfo/io.github.fabio.SayWrite.appdata.xml",
         "install -Dm644 data/io.github.fabio.SayWrite.svg /app/share/icons/hicolor/scalable/apps/io.github.fabio.SayWrite.svg"

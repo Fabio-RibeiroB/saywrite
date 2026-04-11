@@ -1,8 +1,4 @@
-use std::{
-    fs,
-    io::{Read, Seek, SeekFrom, Write},
-    path::PathBuf,
-};
+use std::{fs, path::PathBuf, process::Command, thread, time::Duration};
 
 use anyhow::{anyhow, Context, Result};
 
@@ -38,9 +34,6 @@ pub fn model_exists_for_size(size: ModelSize) -> bool {
 }
 
 /// Download the default whisper model to `local_models_dir()`.
-///
-/// Calls `on_progress` periodically with the current download state.
-/// Performs an atomic write: downloads to a `.part` file first, then renames.
 pub fn download_default_model<F>(on_progress: F) -> Result<PathBuf>
 where
     F: Fn(DownloadProgress),
@@ -49,12 +42,25 @@ where
 }
 
 /// Download a whisper model of the given size to `local_models_dir()`.
-///
-/// Supports download resume: if a `.part` file exists, sends a Range header
-/// to continue from where it left off.
 pub fn download_model<F>(size: ModelSize, on_progress: F) -> Result<PathBuf>
 where
     F: Fn(DownloadProgress),
+{
+    download_model_cancellable(size, on_progress, || false)
+}
+
+/// Download a whisper model using curl, with progress polling and cancel support.
+///
+/// Uses curl rather than a Rust HTTP client because Hugging Face throttles
+/// raw HTTP clients but not curl. Resumes partial downloads automatically.
+pub fn download_model_cancellable<F, C>(
+    size: ModelSize,
+    on_progress: F,
+    should_cancel: C,
+) -> Result<PathBuf>
+where
+    F: Fn(DownloadProgress),
+    C: Fn() -> bool,
 {
     let dest = model_path_for_size(size);
     if model_exists_for_size(size) {
@@ -68,71 +74,64 @@ where
     let part_path = dest.with_extension("bin.part");
     let url = format!("{}{}", MODEL_BASE_URL, size.filename());
 
-    // Check for existing partial download
-    let existing_size = fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
+    // Get total file size upfront so the UI can show a proper progress bar.
+    let total_bytes = get_content_length(&url);
 
-    let response = if existing_size > 0 {
-        // Try resume
-        let resp = ureq::get(&url)
-            .set("Range", &format!("bytes={}-", existing_size))
-            .call()
-            .map_err(|e| anyhow!("failed to download model: {e}"))?;
-        if resp.status() == 206 {
-            // Partial content — resume
-            resp
-        } else {
-            // Server doesn't support range; restart
-            let _ = fs::remove_file(&part_path);
-            ureq::get(&url)
-                .call()
-                .map_err(|e| anyhow!("failed to download model: {e}"))?
-        }
-    } else {
-        ureq::get(&url)
-            .call()
-            .map_err(|e| anyhow!("failed to download model: {e}"))?
-    };
+    // Spawn curl:
+    //   -L  follow redirects (HF uses them)
+    //   -C - resume from existing partial file if present
+    //   --silent --show-error  no progress noise, but do surface errors
+    //   --fail  exit non-zero on HTTP 4xx/5xx
+    //   --retry 3  retry transient network failures
+    let mut child = Command::new("curl")
+        .args([
+            "-L",
+            "-C",
+            "-",
+            "--silent",
+            "--show-error",
+            "--fail",
+            "--retry",
+            "3",
+            "--retry-delay",
+            "2",
+            "-o",
+            &part_path.to_string_lossy().into_owned(),
+            &url,
+        ])
+        .spawn()
+        .context("curl is required for model downloads but was not found")?;
 
-    let is_resume = response.status() == 206;
-    let content_length = response
-        .header("content-length")
-        .and_then(|v| v.parse::<u64>().ok());
-    let total_bytes = content_length.map(|cl| if is_resume { cl + existing_size } else { cl });
-
-    let mut reader = response.into_reader();
-    let mut file = if is_resume {
-        let mut f = fs::OpenOptions::new()
-            .append(true)
-            .open(&part_path)
-            .with_context(|| format!("failed to open {} for resume", part_path.display()))?;
-        f.seek(SeekFrom::End(0))?;
-        f
-    } else {
-        fs::File::create(&part_path)
-            .with_context(|| format!("failed to create {}", part_path.display()))?
-    };
-
-    let mut buf = [0u8; 64 * 1024];
-    let mut downloaded: u64 = if is_resume { existing_size } else { 0 };
-
+    // Poll the growing part file for progress every 300 ms.
     loop {
-        let n = reader.read(&mut buf).context("download interrupted")?;
-        if n == 0 {
-            break;
+        if should_cancel() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(anyhow!("download canceled"));
         }
-        file.write_all(&buf[..n])
-            .context("failed to write model data")?;
-        downloaded += n as u64;
+
+        let downloaded = fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
         on_progress(DownloadProgress {
             bytes_downloaded: downloaded,
             total_bytes,
         });
+
+        match child
+            .try_wait()
+            .context("failed to check curl download status")?
+        {
+            Some(status) if status.success() => break,
+            Some(_) => {
+                return Err(anyhow!(
+                    "download failed — check your internet connection and try again"
+                ));
+            }
+            None => {
+                thread::sleep(Duration::from_millis(300));
+            }
+        }
     }
 
-    file.flush().context("failed to flush model file")?;
-    drop(file);
-
-    // Validate: file shouldn't be tiny (corrupt/empty)
     let size_on_disk = fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
     if size_on_disk < VALID_MODEL_MIN_BYTES {
         let _ = fs::remove_file(&part_path);
@@ -152,7 +151,7 @@ where
     Ok(dest)
 }
 
-/// Remove any partial download left behind by a failed attempt.
+/// Remove any partial download left behind by a failed or cancelled attempt.
 pub fn cleanup_partial() {
     let part_path = default_model_path().with_extension("bin.part");
     let _ = fs::remove_file(part_path);
@@ -171,4 +170,20 @@ pub fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{:.1} MB", bytes as f64 / 1_000_000.0)
     }
+}
+
+/// Fetch the Content-Length of a URL via a HEAD request using curl.
+/// Returns None if unavailable.
+fn get_content_length(url: &str) -> Option<u64> {
+    let output = Command::new("curl")
+        .args(["-sI", "--max-time", "10", url])
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if line.to_ascii_lowercase().starts_with("content-length:") {
+            return line.split(':').nth(1)?.trim().parse().ok();
+        }
+    }
+    None
 }

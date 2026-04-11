@@ -1,6 +1,7 @@
 use std::{
     env,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 use crate::host_integration;
@@ -15,20 +16,12 @@ pub struct HostSetupStatus {
     pub gnome_shortcut_command: Option<String>,
 }
 
-/// Returns `true` when the SayWrite source repo is reachable and the install
-/// script is present, meaning `install_host_companion()` can succeed.
-/// When this returns `false` the UI should show manual-install guidance instead.
 pub fn can_install_in_app() -> bool {
-    repo_root()
-        .map(|root| root.join("scripts/install-host.sh").exists())
-        .unwrap_or(false)
+    install_script_path().is_some()
 }
 
-/// Progress update sent from `install_host_companion` to the UI thread.
 pub enum HostInstallUpdate {
-    /// An intermediate status message to display while work is in progress.
     Progress(String),
-    /// Installation completed successfully.
     Done,
 }
 
@@ -47,69 +40,70 @@ pub fn host_setup_status() -> HostSetupStatus {
     }
 }
 
-/// Kick off host companion installation in a background thread.
-/// Returns a receiver that delivers `Ok(HostInstallUpdate)` progress messages
-/// or `Err(String)` on fatal failure. Channel disconnect signals the end of
-/// the run (check whether the last message was `Done` or `Err`).
-pub fn install_host_companion(
-) -> std::sync::mpsc::Receiver<Result<HostInstallUpdate, String>> {
+pub fn install_host_companion() -> std::sync::mpsc::Receiver<Result<HostInstallUpdate, String>> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let repo_root = match repo_root() {
-            Some(root) => root,
+        let install_script = match install_script_path() {
+            Some(path) => path,
             None => {
                 let _ = tx.send(Err(
-                    "Could not locate the SayWrite source repository. \
-                     Run this from the repo directory."
+                    "No bundled installer is available in this build. Open the source checkout and run the host install script manually."
                         .into(),
                 ));
                 return;
             }
         };
 
-        let install_script = repo_root.join("scripts/install-host.sh");
-        if !install_script.exists() {
-            let _ = tx.send(Err(format!(
-                "Install script not found at {}",
-                install_script.display()
-            )));
-            return;
-        }
+        if uses_repo_assets(&install_script) {
+            let repo_root = match repo_root() {
+                Some(root) => root,
+                None => {
+                    let _ = tx.send(Err(
+                        "Could not locate the SayWrite source repository. Run this build from the repo or use a Flatpak build that bundles the host installer."
+                            .into(),
+                    ));
+                    return;
+                }
+            };
 
-        let binary = repo_root.join("target/release/saywrite-host");
-        if !binary.exists() {
-            let _ = tx.send(Ok(HostInstallUpdate::Progress(
-                "Building saywrite-host — this may take a minute\u{2026}".into(),
-            )));
-            match std::process::Command::new("cargo")
-                .args(["build", "--release", "--bin", "saywrite-host"])
-                .current_dir(&repo_root)
-                .output()
-            {
-                Ok(out) if out.status.success() => {
-                    let _ = tx.send(Ok(HostInstallUpdate::Progress("Build complete.".into())));
-                }
-                Ok(out) => {
-                    let stderr = String::from_utf8_lossy(&out.stderr);
-                    let snippet = stderr.lines().take(6).collect::<Vec<_>>().join("\n");
-                    let _ = tx.send(Err(format!("Build failed:\n{snippet}")));
-                    return;
-                }
-                Err(err) => {
-                    let _ = tx.send(Err(format!("Failed to run cargo: {err}")));
-                    return;
+            let binary = repo_root.join("target/release/saywrite-host");
+            if !binary.exists() {
+                let _ = tx.send(Ok(HostInstallUpdate::Progress(
+                    "Building saywrite-host — this may take a minute…".into(),
+                )));
+                match Command::new("cargo")
+                    .args(["build", "--release", "--bin", "saywrite-host"])
+                    .current_dir(&repo_root)
+                    .output()
+                {
+                    Ok(out) if out.status.success() => {
+                        let _ = tx.send(Ok(HostInstallUpdate::Progress("Build complete.".into())));
+                    }
+                    Ok(out) => {
+                        let stderr = String::from_utf8_lossy(&out.stderr);
+                        let snippet = stderr.lines().take(6).collect::<Vec<_>>().join("\n");
+                        let _ = tx.send(Err(format!("Build failed:\n{snippet}")));
+                        return;
+                    }
+                    Err(err) => {
+                        let _ = tx.send(Err(format!("Failed to run cargo: {err}")));
+                        return;
+                    }
                 }
             }
         }
 
         let _ = tx.send(Ok(HostInstallUpdate::Progress(
-            "Installing host companion\u{2026}".into(),
+            "Installing host companion…".into(),
         )));
-        match std::process::Command::new("bash")
-            .arg(&install_script)
-            .current_dir(&repo_root)
-            .output()
-        {
+
+        let mut command = Command::new("bash");
+        command.arg(&install_script);
+        if let Some(dir) = install_script.parent() {
+            command.current_dir(dir);
+        }
+
+        match command.output() {
             Ok(out) if out.status.success() => {
                 let _ = tx.send(Ok(HostInstallUpdate::Done));
             }
@@ -117,8 +111,9 @@ pub fn install_host_companion(
                 let stderr = String::from_utf8_lossy(&out.stderr);
                 let stdout = String::from_utf8_lossy(&out.stdout);
                 let text = if !stderr.is_empty() { stderr } else { stdout };
-                let snippet = text.lines().take(6).collect::<Vec<_>>().join("\n");
-                let _ = tx.send(Err(format!("Install script failed:\n{snippet}")));
+                let snippet = text.lines().take(8).collect::<Vec<_>>().join("
+");
+                let _ = tx.send(Err(format!("Install failed:\n{snippet}")));
             }
             Err(err) => {
                 let _ = tx.send(Err(format!("Failed to run install script: {err}")));
@@ -131,7 +126,7 @@ pub fn install_host_companion(
 pub fn host_install_instructions() -> String {
     let setup = host_setup_status();
     let mut steps = vec![
-        "Install the host companion:".to_string(),
+        "Enable Direct Typing:".to_string(),
         String::new(),
         format!("1. {}", setup.install_command),
     ];
@@ -144,7 +139,8 @@ pub fn host_install_instructions() -> String {
     steps.push("After installation:".into());
     steps.push("  systemctl --user status saywrite-host".into());
     steps.push("  journalctl --user -u saywrite-host -f".into());
-    steps.join("\n")
+    steps.join("
+")
 }
 
 fn host_binary_path() -> PathBuf {
@@ -166,6 +162,10 @@ fn host_dbus_service_path() -> PathBuf {
 }
 
 fn host_install_command() -> String {
+    if bundled_asset_root().is_some() {
+        return "Press Install in Settings.".into();
+    }
+
     if let Some(repo_root) = repo_root() {
         if repo_root.join("scripts/install-host.sh").exists() {
             return "cargo build --release\n   bash scripts/install-host.sh".into();
@@ -180,6 +180,10 @@ fn gnome_shortcut_command() -> Option<String> {
         return None;
     }
 
+    if bundled_asset_root().is_some() {
+        return Some("Press Install, then use the bundled GNOME shortcut helper if needed.".into());
+    }
+
     if let Some(repo_root) = repo_root() {
         if repo_root.join("scripts/install-gnome-shortcut.sh").exists() {
             return Some("bash scripts/install-gnome-shortcut.sh".into());
@@ -187,6 +191,26 @@ fn gnome_shortcut_command() -> Option<String> {
     }
 
     Some("Create a GNOME custom shortcut that runs the SayWrite host toggle command.".into())
+}
+
+fn bundled_asset_root() -> Option<PathBuf> {
+    let path = PathBuf::from("/app/share/saywrite");
+    path.join("install-host.sh").exists().then_some(path)
+}
+
+fn install_script_path() -> Option<PathBuf> {
+    if let Some(root) = bundled_asset_root() {
+        return Some(root.join("install-host.sh"));
+    }
+
+    repo_root().and_then(|root| {
+        let script = root.join("scripts/install-host.sh");
+        script.exists().then_some(script)
+    })
+}
+
+fn uses_repo_assets(install_script: &Path) -> bool {
+    !install_script.starts_with("/app/")
 }
 
 fn repo_root() -> Option<PathBuf> {

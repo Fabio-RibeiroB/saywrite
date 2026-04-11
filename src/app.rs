@@ -1,5 +1,5 @@
 use libadwaita as adw;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, path::Path, process::Command, rc::Rc};
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
@@ -56,23 +56,29 @@ fn load_css() {
 }
 
 fn start_host_daemon() {
-    // Unmask in case we masked it on last shutdown, then start.
-    let _ = std::process::Command::new("systemctl")
-        .args(["--user", "unmask", "saywrite-host.service"])
-        .status();
-    let _ = std::process::Command::new("systemctl")
-        .args(["--user", "start", "saywrite-host.service"])
-        .status();
+    run_user_systemctl(&["unmask", "saywrite-host.service"]);
+    run_user_systemctl(&["start", "saywrite-host.service"]);
 }
 
 fn stop_host_daemon() {
-    // Stop first, then mask to prevent D-Bus activation from restarting it.
-    let _ = std::process::Command::new("systemctl")
-        .args(["--user", "stop", "saywrite-host.service"])
-        .status();
-    let _ = std::process::Command::new("systemctl")
-        .args(["--user", "mask", "saywrite-host.service"])
-        .status();
+    run_user_systemctl(&["stop", "saywrite-host.service"]);
+    run_user_systemctl(&["mask", "saywrite-host.service"]);
+}
+
+fn run_user_systemctl(args: &[&str]) {
+    let status = if inside_flatpak() {
+        Command::new("flatpak-spawn")
+            .args(["--host", "systemctl", "--user"])
+            .args(args)
+            .status()
+    } else {
+        Command::new("systemctl").arg("--user").args(args).status()
+    };
+    let _ = status;
+}
+
+fn inside_flatpak() -> bool {
+    Path::new("/.flatpak-info").exists()
 }
 
 fn register_resources() {

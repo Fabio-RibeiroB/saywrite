@@ -263,7 +263,7 @@ impl HostService {
         state.last_status = message.into();
     }
 
-    async fn reject_if_repeated_toggle(&self) -> Option<String> {
+    pub(crate) async fn reject_if_repeated_toggle(&self) -> Option<String> {
         const TOGGLE_DEBOUNCE_MS: u128 = 900;
 
         let mut state = self.inner.state.lock().await;
@@ -283,7 +283,7 @@ impl HostService {
     }
 }
 
-fn sanitize_error(err: &anyhow::Error) -> (String, String) {
+pub(crate) fn sanitize_error(err: &anyhow::Error) -> (String, String) {
     if let Some(dictation_err) = err.downcast_ref::<DictationError>() {
         let message = match dictation_err {
             DictationError::WhisperCliNotFound => {
@@ -302,4 +302,114 @@ fn sanitize_error(err: &anyhow::Error) -> (String, String) {
         INSERTION_RESULT_FAILED.into(),
         "The host daemon hit an unexpected error.".into(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use saywrite::dictation::DictationError;
+
+    #[test]
+    fn sanitize_whisper_not_found() {
+        let (kind, msg) = sanitize_error(&anyhow::Error::new(DictationError::WhisperCliNotFound));
+        assert_eq!(kind, INSERTION_RESULT_FAILED);
+        assert!(
+            msg.contains("whisper"),
+            "expected whisper mention, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn sanitize_no_local_model() {
+        let (kind, msg) = sanitize_error(&anyhow::Error::new(DictationError::NoLocalModel));
+        assert_eq!(kind, INSERTION_RESULT_FAILED);
+        assert!(msg.contains("model"), "expected model mention, got: {msg}");
+    }
+
+    #[test]
+    fn sanitize_no_audio_captured() {
+        let (kind, msg) = sanitize_error(&anyhow::Error::new(DictationError::NoAudioCaptured));
+        assert_eq!(kind, INSERTION_RESULT_FAILED);
+        assert!(
+            msg.contains("microphone") || msg.contains("audio"),
+            "expected audio/microphone mention, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn sanitize_missing_runtime_dir() {
+        let (kind, msg) = sanitize_error(&anyhow::Error::new(DictationError::MissingRuntimeDir));
+        assert_eq!(kind, INSERTION_RESULT_FAILED);
+        assert!(
+            msg.contains("directory") || msg.contains("runtime"),
+            "expected directory/runtime mention, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn sanitize_generic_error_yields_fallback_message() {
+        let (kind, msg) = sanitize_error(&anyhow::anyhow!("some opaque internal failure"));
+        assert_eq!(kind, INSERTION_RESULT_FAILED);
+        assert!(
+            msg.contains("unexpected"),
+            "expected fallback message, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn all_sanitized_errors_use_failed_result_kind() {
+        let errors: Vec<anyhow::Error> = vec![
+            anyhow::Error::new(DictationError::WhisperCliNotFound),
+            anyhow::Error::new(DictationError::NoLocalModel),
+            anyhow::Error::new(DictationError::NoAudioCaptured),
+            anyhow::Error::new(DictationError::MissingRuntimeDir),
+            anyhow::anyhow!("generic"),
+        ];
+        for err in errors {
+            let (kind, _) = sanitize_error(&err);
+            assert_eq!(
+                kind, INSERTION_RESULT_FAILED,
+                "all errors must map to failed result kind"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn debounce_passes_first_toggle_and_rejects_immediate_repeat() {
+        let service = HostService::new().expect("HostService::new");
+
+        let first = service.reject_if_repeated_toggle().await;
+        assert!(
+            first.is_none(),
+            "first toggle should not be debounced, got: {first:?}"
+        );
+
+        let second = service.reject_if_repeated_toggle().await;
+        assert!(
+            second.is_some(),
+            "immediate repeat should be debounced"
+        );
+        let msg = second.unwrap();
+        assert!(
+            msg.contains("shortcut") || msg.contains("repeated"),
+            "rejection message should explain the debounce, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn debounce_allows_toggle_after_cooldown() {
+        use std::time::Duration;
+
+        let service = HostService::new().expect("HostService::new");
+
+        service.reject_if_repeated_toggle().await;
+        // Wait out the 900ms debounce window
+        tokio::time::sleep(Duration::from_millis(950)).await;
+
+        let after_cooldown = service.reject_if_repeated_toggle().await;
+        assert!(
+            after_cooldown.is_none(),
+            "toggle after cooldown should be allowed, got: {after_cooldown:?}"
+        );
+    }
 }
