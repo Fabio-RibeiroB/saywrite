@@ -1,11 +1,5 @@
 use libadwaita as adw;
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    sync::mpsc,
-    thread,
-    time::Duration,
-};
+use std::{cell::RefCell, rc::Rc, sync::mpsc, thread, time::Duration};
 
 use adw::prelude::*;
 use gtk::{gdk, glib, Align, Orientation};
@@ -22,9 +16,7 @@ use crate::{
 const ASYNC_POLL_INTERVAL: Duration = Duration::from_millis(80);
 
 enum InlineDownloadState {
-    Progress {
-        label: String,
-    },
+    Progress { label: String },
     Done,
 }
 
@@ -191,7 +183,9 @@ impl MainWindowUi {
         self.setup_download_btn.set_visible(false);
         self.setup_settings_btn.set_visible(false);
         self.setup_api_row.set_visible(false);
-        self.dictate_btn.set_sensitive(true);
+        if !*self.is_listening.borrow() {
+            self.dictate_btn.set_sensitive(true);
+        }
     }
 
     fn apply_toggle_success(&self, starting: bool) {
@@ -364,10 +358,14 @@ impl MainWindowUi {
         let trimmed = text.trim();
         let words = trimmed.split_whitespace().count();
         let chars = trimmed.chars().count();
-        self.word_count_label
-            .set_label(&format!("{words} word{}", if words == 1 { "" } else { "s" }));
-        self.char_count_label
-            .set_label(&format!("{chars} char{}", if chars == 1 { "" } else { "s" }));
+        self.word_count_label.set_label(&format!(
+            "{words} word{}",
+            if words == 1 { "" } else { "s" }
+        ));
+        self.char_count_label.set_label(&format!(
+            "{chars} char{}",
+            if chars == 1 { "" } else { "s" }
+        ));
         *self.last_cleaned.borrow_mut() = trimmed.to_string();
         let has_text = !trimmed.is_empty();
         self.copy_btn.set_sensitive(has_text);
@@ -377,7 +375,9 @@ impl MainWindowUi {
     }
 
     fn refresh_insertion_chip(&self, status: Option<host_api::HostStatus>) {
-        let (icon_name, label) = match status.as_ref().map(|status| status.insertion_capability.as_str())
+        let (icon_name, label) = match status
+            .as_ref()
+            .map(|status| status.insertion_capability.as_str())
         {
             Some(host_api::INSERTION_CAPABILITY_TYPING) => {
                 ("input-keyboard-symbolic", "Direct Typing")
@@ -394,12 +394,13 @@ impl MainWindowUi {
             .set_child(Some(&status_chip_content(icon_name, label)));
         self.type_btn.set_visible(status.is_some());
         if let Some(status) = status {
-            self.type_btn.set_label(match status.insertion_capability.as_str() {
-                host_api::INSERTION_CAPABILITY_TYPING => "Type into App",
-                host_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY => "Copy for App",
-                host_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY => "Show Result",
-                _ => "Send to App",
-            });
+            self.type_btn
+                .set_label(match status.insertion_capability.as_str() {
+                    host_api::INSERTION_CAPABILITY_TYPING => "Type into App",
+                    host_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY => "Copy for App",
+                    host_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY => "Show Result",
+                    _ => "Send to App",
+                });
         }
     }
 }
@@ -562,7 +563,8 @@ fn build_body(
     {
         let window = window.clone();
         let settings = settings.clone();
-        setup_settings_btn.connect_clicked(move |_| preferences::present(&window, settings.clone()));
+        setup_settings_btn
+            .connect_clicked(move |_| preferences::present(&window, settings.clone()));
     }
 
     setup_panel.append(&setup_icon);
@@ -723,7 +725,8 @@ fn build_body(
             btn.set_sensitive(false);
             btn.set_label("Downloading…");
             ui.state_label.set_label("Downloading local model…");
-            ui.setup_detail.set_label("This can take a minute on slower connections.");
+            ui.setup_detail
+                .set_label("This can take a minute on slower connections.");
 
             let (tx, rx) = mpsc::channel::<Result<InlineDownloadState, String>>();
             thread::spawn(move || {
@@ -780,7 +783,9 @@ fn build_body(
                             ui_for_value
                                 .state_label
                                 .set_label("Local dictation is still waiting on a model");
-                            ui_for_value.setup_detail.set_label(&friendly_error_message(&err));
+                            ui_for_value
+                                .setup_detail
+                                .set_label(&friendly_error_message(&err));
                             model_installer::cleanup_partial_for_size(size);
                         }
                     }
@@ -880,8 +885,7 @@ fn build_body(
             let (tx, rx) = mpsc::channel::<Result<String, String>>();
             let text_for_send = text.clone();
             thread::spawn(move || {
-                let result =
-                    host_integration::send_text(&text_for_send, 0.0).map_err(|e| e.to_string());
+                let result = host_integration::send_text(&text_for_send).map_err(|e| e.to_string());
                 let _ = tx.send(result);
             });
 
@@ -958,7 +962,7 @@ fn refresh_window_state(ui: &MainWindowUi, settings: &Rc<RefCell<AppSettings>>) 
     let host_status = host_integration::host_status();
     ui.refresh_insertion_chip(host_status.clone());
 
-    let host_setup = host_integration::host_setup_status();
+    let host_setup = crate::host_setup::host_setup_status();
     let probe = runtime::probe_runtime(&settings_ref);
 
     if host_status.is_none() {
@@ -989,7 +993,9 @@ fn refresh_window_state(ui: &MainWindowUi, settings: &Rc<RefCell<AppSettings>>) 
                 return;
             }
 
-            if !probe.local_model_present && !model_installer::model_exists_for_size(settings_ref.model_size) {
+            if !probe.local_model_present
+                && !model_installer::model_exists_for_size(settings_ref.model_size)
+            {
                 ui.set_setup_state(
                     "Local dictation is not ready yet",
                     "Download a local model",

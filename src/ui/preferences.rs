@@ -6,7 +6,7 @@ use gtk::{glib, Align};
 
 use crate::{
     config::{AppSettings, ModelSize, ProviderMode},
-    host_integration, model_installer,
+    dictation, host_integration, model_installer,
     runtime::{probe_runtime, RuntimeProbe},
     ui::async_poll,
 };
@@ -336,7 +336,45 @@ fn build_engine_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPage
     }
     cloud_group.add(&key_row);
 
+    let mic_group = adw::PreferencesGroup::builder()
+        .title("Microphone")
+        .description("Choose which input device SayWrite should record from.")
+        .build();
+
+    let devices = dictation::list_input_devices();
+    let mut device_labels = vec!["System default".to_string()];
+    device_labels.extend(devices.iter().map(|d| d.label.clone()));
+    let selected_device = settings.borrow().input_device_name.clone();
+    let selected_index = selected_device
+        .as_ref()
+        .and_then(|id| devices.iter().position(|d| d.id == *id))
+        .map(|i| i + 1)
+        .unwrap_or(0) as u32;
+
+    let mic_row = adw::ComboRow::builder()
+        .title("Input device")
+        .subtitle("Used for dictation recording")
+        .build();
+    let labels: Vec<&str> = device_labels.iter().map(|s| s.as_str()).collect();
+    mic_row.set_model(Some(&gtk::StringList::new(&labels)));
+    mic_row.set_selected(selected_index);
+    {
+        let settings = settings.clone();
+        mic_row.connect_selected_notify(move |row| {
+            let mut state = settings.borrow_mut();
+            let idx = row.selected() as usize;
+            state.input_device_name = if idx == 0 {
+                None
+            } else {
+                devices.get(idx - 1).map(|d| d.id.clone())
+            };
+            let _ = state.save();
+        });
+    }
+    mic_group.add(&mic_row);
+
     page.add(&mode_group);
+    page.add(&mic_group);
     page.add(&local_group);
     page.add(&cloud_group);
     page
@@ -376,7 +414,28 @@ fn build_shortcut_page(settings: Rc<RefCell<AppSettings>>) -> adw::PreferencesPa
 
     group.add(&shortcut_row);
     group.add(&note_row);
+
+    let behaviour_group = adw::PreferencesGroup::builder()
+        .title("During dictation")
+        .build();
+
+    let pause_audio_row = adw::SwitchRow::builder()
+        .title("Pause PC audio while recording")
+        .subtitle("Mutes all playback when dictation starts and restores it when you stop.")
+        .build();
+    pause_audio_row.set_active(settings.borrow().pause_audio_during_dictation);
+    {
+        let settings = settings.clone();
+        pause_audio_row.connect_active_notify(move |row| {
+            let mut state = settings.borrow_mut();
+            state.pause_audio_during_dictation = row.is_active();
+            let _ = state.save();
+        });
+    }
+    behaviour_group.add(&pause_audio_row);
+
     page.add(&group);
+    page.add(&behaviour_group);
     page
 }
 
@@ -387,7 +446,7 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
         .build();
     let probe = probe_runtime(&settings.borrow());
     let host_status = host_integration::host_status();
-    let host_setup = host_integration::host_setup_status();
+    let host_setup = crate::host_setup::host_setup_status();
 
     page.add(&build_probe_group("Runtime", &probe));
 
@@ -453,11 +512,13 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
             })
             .build();
         note_group.add(&shortcut_row);
-    } else if host_integration::can_install_in_app() {
+    } else if crate::host_setup::can_install_in_app() {
         // Source repo is available — offer one-click install.
         let install_row = adw::ActionRow::builder()
             .title("Direct Typing Mode")
-            .subtitle("Install the host companion to enable hotkey dictation and direct text insertion.")
+            .subtitle(
+                "Install the host companion to enable hotkey dictation and direct text insertion.",
+            )
             .build();
 
         let install_progress_row = adw::ActionRow::builder()
@@ -481,7 +542,7 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
                 install_progress_row.set_subtitle("Starting\u{2026}");
                 install_row.set_subtitle("Installation in progress\u{2026}");
 
-                let rx = host_integration::install_host_companion();
+                let rx = crate::host_setup::install_host_companion();
 
                 let btn = btn.clone();
                 let install_row = install_row.clone();
@@ -493,20 +554,19 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
                     rx,
                     Duration::from_millis(200),
                     move |result| match result {
-                        Ok(host_integration::HostInstallUpdate::Progress(msg)) => {
+                        Ok(crate::host_setup::HostInstallUpdate::Progress(msg)) => {
                             install_progress_row.set_subtitle(&msg);
                             glib::ControlFlow::Continue
                         }
-                        Ok(host_integration::HostInstallUpdate::Done) => {
+                        Ok(crate::host_setup::HostInstallUpdate::Done) => {
                             btn.set_label("Installed");
                             btn.remove_css_class("suggested-action");
                             install_row.set_subtitle(
                                 "Host companion installed. Reopen Settings to confirm status.",
                             );
                             install_progress_row.set_title("Done");
-                            install_progress_row.set_subtitle(
-                                "saywrite-host is running as a user service.",
-                            );
+                            install_progress_row
+                                .set_subtitle("saywrite-host is running as a user service.");
                             glib::ControlFlow::Break
                         }
                         Err(msg) => {
@@ -539,7 +599,7 @@ fn build_diagnostics_page(settings: Rc<RefCell<AppSettings>>) -> adw::Preference
     } else {
         // No source repo available (packaged/Flatpak install) — show manual
         // install guidance instead of a button that would always fail.
-        let instructions = host_integration::host_install_instructions();
+        let instructions = crate::host_setup::host_install_instructions();
         let manual_row = adw::ActionRow::builder()
             .title("Direct Typing Mode")
             .subtitle(&instructions)
