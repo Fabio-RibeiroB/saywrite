@@ -12,7 +12,7 @@ use saywrite::{
 use tokio::sync::Mutex;
 
 use crate::{
-    hotkey::{self, HotkeyStatus},
+    input::{self, HotkeyStatus},
     insertion::{self, InsertionStatus},
 };
 
@@ -73,11 +73,11 @@ impl HostService {
     }
 
     pub async fn hotkey_status(&self) -> HotkeyStatus {
-        hotkey::probe(&AppSettings::load())
+        input::probe(&AppSettings::load())
     }
 
     pub async fn get_status(&self) -> HostStatus {
-        let hotkey = hotkey::probe(&AppSettings::load());
+        let hotkey = input::probe(&AppSettings::load());
         let insertion = insertion::probe();
         let mut state = self.inner.state.lock().await;
         state.insertion = insertion.clone();
