@@ -150,8 +150,6 @@ docs/                   Product and architecture documentation (see docs/README.
 vendor/                 Vendored dependencies (whisper.cpp)
 ```
 
-**Legacy material:** The Python backend and host-helper code remain in-tree as reference during the current Rust migration. They are not part of the intended long-term architecture.
-
 ## Documentation
 
 See [docs/README.md](docs/README.md) for the documentation index, including which docs are current versus historical.
@@ -162,9 +160,9 @@ Key docs:
 - [docs/holistic_review.md](docs/holistic_review.md) — current technical assessment
 - [docs/architecture.md](docs/architecture.md) — design rationale (historical; not the current implementation plan)
 
-## Migration Status
+## Current Implementation Status
 
-The app shell is being rebuilt in Rust + GTK4/libadwaita. The older Python code remains in-tree during this transition so the working dictation prototype is not lost.
+The current app and host workflow are Rust-native. The supported development path is the GTK app plus the `saywrite-host` daemon described above.
 
 Current state:
 - GTK app exists as the setup and diagnostics surface
@@ -174,4 +172,4 @@ Current state:
 - direct insertion works on the validated GNOME Wayland setup
 - clipboard and notification fallbacks work on other environments
 
-The next major milestone is packaging the host companion cleanly so Direct Typing Mode feels like a single guided step inside the app, not a separate manual install.
+The next major milestone is support-matrix validation and release polish so Direct Typing Mode can be documented with narrower, evidence-backed claims.

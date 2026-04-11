@@ -14,6 +14,12 @@ use crate::{
 };
 
 static ACTIVE_SESSION: OnceLock<Mutex<Option<RecordingSession>>> = OnceLock::new();
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioInputDevice {
+    pub id: String,
+    pub label: String,
+}
 /// Base GStreamer capture pipeline. The source element and any properties
 /// are prepended at launch time by `build_capture_args()`.
 const GST_CAPTURE_PIPELINE_TAIL: &[&str] = &[
@@ -30,18 +36,21 @@ const GST_CAPTURE_PIPELINE_TAIL: &[&str] = &[
 ];
 
 /// Build the full gst-launch argument list, choosing the best microphone
-/// source available on this system. We avoid `autoaudiosrc` because it can
-/// pick up monitor/loopback sources instead of a real microphone.
-pub fn build_capture_args(location: &str) -> Vec<String> {
+/// source available on this system. If `device_override` is set, use that
+/// device directly. Otherwise, we query WirePlumber for the default source
+/// and avoid `autoaudiosrc` because it can pick up monitor/loopback sources.
+pub fn build_capture_args(location: &str, device_override: Option<&str>) -> Vec<String> {
     let mut args: Vec<String> = vec!["-q".into(), "-e".into()];
 
-    // Try to find a real hardware capture device via PipeWire/WirePlumber.
-    // `wpctl status` marks the default source with `*`.
-    if let Some(node_name) = default_pipewire_source() {
-        args.push("pulsesrc".into());
-        args.push(format!("device={node_name}"));
-    } else {
-        args.push("pulsesrc".into());
+    let device = device_override
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .or_else(default_pipewire_source);
+
+    args.push("pulsesrc".into());
+    if let Some(name) = device {
+        args.push(format!("device={name}"));
     }
 
     for part in GST_CAPTURE_PIPELINE_TAIL {
@@ -163,8 +172,15 @@ pub fn start_live(settings: &AppSettings) -> Result<String> {
         return Err(anyhow!("A dictation session is already running."));
     }
 
+    if settings.pause_audio_during_dictation {
+        mute_playback(true);
+    }
+
     let audio_path = next_recording_path()?;
-    let capture_args = build_capture_args(&audio_path.display().to_string());
+    let capture_args = build_capture_args(
+        &audio_path.display().to_string(),
+        settings.input_device_name.as_deref(),
+    );
     let child = Command::new("gst-launch-1.0")
         .args(&capture_args)
         .spawn()
@@ -181,6 +197,10 @@ pub fn stop_live(settings: &AppSettings) -> Result<TranscriptResult> {
         .take()
         .ok_or_else(|| anyhow!("No dictation session is running."))?;
     let audio_file = RecordingFileGuard::new(session.audio_path.clone());
+
+    if settings.pause_audio_during_dictation {
+        mute_playback(false);
+    }
 
     interrupt_recording(&mut session.child)?;
     session
@@ -336,7 +356,7 @@ fn interrupt_recording(child: &mut Child) -> Result<()> {
 /// Minimum RMS energy (0.0–1.0 scale for 16-bit PCM) below which we treat
 /// the recording as silence. This filters out electrical crosstalk and
 /// background hum that whisper would otherwise hallucinate on.
-const SILENCE_RMS_THRESHOLD: f64 = 0.005;
+const SILENCE_RMS_THRESHOLD: f64 = 0.0001;
 
 fn validate_recording(audio_path: &Path) -> Result<()> {
     let metadata = fs::metadata(audio_path)
@@ -404,6 +424,53 @@ fn transcribe_file(model_path: &Path, whisper_cli: &Path, audio_path: &Path) -> 
     }
 
     Ok(extract_transcript(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Mute or unmute the default audio sink via WirePlumber.
+/// Failures are logged but never fatal — audio control is best-effort.
+fn mute_playback(mute: bool) {
+    let value = if mute { "1" } else { "0" };
+    match Command::new("wpctl")
+        .args(["set-mute", "@DEFAULT_AUDIO_SINK@", value])
+        .status()
+    {
+        Ok(status) if !status.success() => {
+            eprintln!("wpctl set-mute exited with {status}");
+        }
+        Err(err) => {
+            eprintln!("failed to run wpctl set-mute: {err}");
+        }
+        _ => {}
+    }
+}
+
+/// List available audio input devices via `pactl`.
+pub fn list_input_devices() -> Vec<AudioInputDevice> {
+    let output = match Command::new("pactl")
+        .args(["list", "short", "sources"])
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        _ => return Vec::new(),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut devices = Vec::new();
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() >= 2 {
+            let id = parts[1].to_string();
+            // Skip monitor sources — they capture desktop audio, not mic
+            if id.contains(".monitor") {
+                continue;
+            }
+            let label = id
+                .replace("alsa_input.", "")
+                .replace(['_', '.'], " ");
+            devices.push(AudioInputDevice { id, label });
+        }
+    }
+    devices
 }
 
 fn extract_transcript(stdout: &str) -> String {

@@ -1,16 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Read(//home/fabio/Documents/GitHub/saywrite-ui-redesign/**)",
-      "Bash(python3 -m py_compile saywrite/app.py)",
-      "Bash(python3 -c ':*)",
+      "Read(//home/fabio/Documents/GitHub/saywrite/**)",
       "Read(//home/fabio/Documents/GitHub/**)",
       "Bash(git -C /home/fabio/Documents/GitHub/saywrite log --oneline --all)",
       "Bash(cargo check:*)",
       "Bash(rustc --version)",
       "Bash(cargo --version)",
       "Bash(apt-cache show:*)",
-      "Bash(rustfmt --edition 2021 --check /home/fabio/Documents/GitHub/saywrite-rust-ui/src/ui/main_window.rs)",
+      "Bash(rustfmt --edition 2021 --check /home/fabio/Documents/GitHub/saywrite/src/ui/main_window.rs)",
       "Bash(git add:*)",
       "Bash(cargo test:*)",
       "Bash(grep -E \"^\\(test |.*error|Finished|.*ok.?$\\)\")"

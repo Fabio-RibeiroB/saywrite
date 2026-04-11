@@ -25,6 +25,21 @@ window {
   letter-spacing: 0.04em;
 }
 
+.recording-orb {
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ff6b6b, #d9485f);
+  box-shadow:
+    0 0 0 8px alpha(#ff6b6b, 0.14),
+    0 10px 22px alpha(#d9485f, 0.20);
+}
+
+.waveform-bar {
+  min-width: 10px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, alpha(@accent_bg_color, 0.96), alpha(#ff6b6b, 0.88));
+  box-shadow: 0 6px 16px alpha(@accent_bg_color, 0.16);
+}
+
 .setup-panel {
   border-radius: 18px;
   padding: 18px 20px;

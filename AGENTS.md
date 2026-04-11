@@ -1,6 +1,6 @@
 # AGENTS.md — SayWrite Codebase Guide
 
-SayWrite is a Linux-first dictation app with a Rust GTK4/libadwaita shell and a Rust host daemon. The goal is simple: speak, get cleaned polished text committed to any text field, with no external setup docs.
+SayWrite is a Linux-first dictation app with a Rust GTK4/libadwaita shell and a Rust host daemon. The goal is simple: speak, get cleaned polished text delivered back to the active app, with no external setup docs.
 
 ## Stack
 
@@ -26,11 +26,12 @@ SayWrite is a Linux-first dictation app with a Rust GTK4/libadwaita shell and a 
 | `src/host_api.rs` | shared D-Bus constants and host status types |
 | `src/runtime.rs` | readiness probing |
 | `src/ui/main_window.rs` | main dictation window |
+| `src/ui/async_poll.rs` | GTK-safe background task polling helper |
 | `src/ui/onboarding.rs` | onboarding carousel |
 | `src/ui/preferences.rs` | preferences and diagnostics |
 | `src/bin/saywrite-host/` | host daemon, hotkey, insertion, and D-Bus service code |
 | `scripts/install-host.sh` | installs `saywrite-host` as a user service + D-Bus service |
-| `scripts/install-gnome-shortcut.sh` | GNOME custom shortcut fallback helper |
+| `scripts/install-gnome-shortcut.sh` | GNOME custom shortcut fallback installer |
 
 ## User-Facing Modes
 
@@ -49,10 +50,11 @@ When writing copy, diagnostics, or onboarding text, use these mode names. Do not
 - `AppSettings.global_shortcut_label` defaults to `Super+Alt+D`.
 - `cleanup_transcript()` is deterministic and should stay conservative.
 - `saywrite-host` exists and answers D-Bus calls on `io.github.saywrite.Host`.
-- The app prefers D-Bus for host insertion and falls back to the legacy Unix socket/clipboard path.
+- The app prefers D-Bus for host insertion and falls back to the Unix socket/clipboard path.
 - The host now attempts XDG GlobalShortcuts portal registration at startup and reports status over D-Bus.
 - Host insertion now exposes explicit capability/result categories: direct typing, clipboard fallback, notification fallback, or unavailable.
 - On GNOME Wayland, host insertion prefers the SayWrite IBus engine bridge; on other setups it falls back to `wtype`, `xdotool`, clipboard tools, or notifications.
+- The GUI starts `saywrite-host` on launch and stops it on app shutdown.
 
 ## Current State
 
@@ -75,6 +77,12 @@ When writing copy, diagnostics, or onboarding text, use these mode names. Do not
 4. Local-first, offline-capable after model download.
 5. Auto-detect acceleration.
 6. Flatpak-first; host integration is a companion, not a hack.
+
+## Repo Hygiene
+
+- Keep `README.md` and `AGENTS.md` up to date whenever product behavior, supported workflows, setup steps, or architecture assumptions change.
+- Remove dead compatibility shims, outdated scripts, and stale copy when they no longer reflect the supported Rust app + `saywrite-host` architecture.
+- Treat clearly marked historical docs in `docs/` as archival context, not as current source of truth.
 
 ## Testing
 

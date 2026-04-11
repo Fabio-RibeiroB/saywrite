@@ -16,7 +16,13 @@ pub fn run() -> glib::ExitCode {
         .flags(gio::ApplicationFlags::FLAGS_NONE)
         .build();
 
-    app.connect_startup(|_| load_css());
+    app.connect_startup(|_| {
+        load_css();
+        start_host_daemon();
+    });
+    app.connect_shutdown(|_| {
+        stop_host_daemon();
+    });
     app.connect_activate(activate);
     app.run()
 }
@@ -47,6 +53,26 @@ fn load_css() {
         &provider,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+}
+
+fn start_host_daemon() {
+    // Unmask in case we masked it on last shutdown, then start.
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "unmask", "saywrite-host.service"])
+        .status();
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "start", "saywrite-host.service"])
+        .status();
+}
+
+fn stop_host_daemon() {
+    // Stop first, then mask to prevent D-Bus activation from restarting it.
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "stop", "saywrite-host.service"])
+        .status();
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "mask", "saywrite-host.service"])
+        .status();
 }
 
 fn register_resources() {

@@ -1,18 +1,22 @@
-# Dev Scripts
+# Scripts Guide
 
-`bootstrap-dev.sh` installs local host dependencies needed to develop SayWrite on Ubuntu-like systems.
+These scripts support local development, host setup, and a few fallback flows. The current supported architecture is the Rust GTK app plus the Rust `saywrite-host` daemon.
 
-Use:
+## Current Development Scripts
+
+`bootstrap-rust-dev.sh` installs Rust and GTK/libadwaita build dependencies on Ubuntu-like systems.
+
+```bash
+./scripts/bootstrap-rust-dev.sh
+```
+
+`bootstrap-dev.sh` installs host-side development dependencies on Ubuntu-like systems.
 
 ```bash
 ./scripts/bootstrap-dev.sh
 ```
 
-This is for development only. It is not part of the intended end-user setup story.
-
 `setup-whispercpp.sh` vendors and builds `whisper.cpp` for local development.
-
-Use:
 
 ```bash
 ./scripts/setup-whispercpp.sh
@@ -28,16 +32,27 @@ Optional explicit modes:
 
 `download-local-model.sh` downloads the default local Whisper model into SayWrite's data directory.
 
-Use:
-
 ```bash
 ./scripts/download-local-model.sh
 ```
 
-`run-host-helper.sh` starts the first host-side insertion helper.
+## Host Setup Scripts
 
-Use:
+`install-host.sh` installs the Rust `saywrite-host` companion into the user environment and registers the user service and D-Bus activation entry.
 
 ```bash
-./scripts/run-host-helper.sh
+cargo build --release
+./scripts/install-host.sh
+```
+
+`install-gnome-shortcut.sh` installs a GNOME custom shortcut fallback that calls the host D-Bus toggle command.
+
+```bash
+./scripts/install-gnome-shortcut.sh
+```
+
+`run-global-dictation.sh` is the debounced helper command used by the GNOME shortcut fallback.
+
+```bash
+./scripts/run-global-dictation.sh
 ```
