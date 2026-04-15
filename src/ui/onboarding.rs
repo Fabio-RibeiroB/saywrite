@@ -334,7 +334,7 @@ fn shortcut_page(
     icon.add_css_class("onboarding-icon");
 
     let title = gtk::Label::builder()
-        .label("One hotkey, not a maze")
+        .label("One Hotkey for Dictation")
         .wrap(true)
         .justify(gtk::Justification::Center)
         .build();

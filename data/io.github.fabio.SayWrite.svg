@@ -1,8 +1,72 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="30" fill="#1f1811"/>
-  <rect x="14" y="14" width="100" height="100" rx="24" fill="#f4ecdf"/>
-  <path d="M45 37a19 19 0 1 1 38 0v19a19 19 0 1 1-38 0V37Z" fill="#d06c42"/>
-  <path d="M35 59c0 16.1 13.4 29 29 29s29-12.9 29-29" fill="none" stroke="#1f1811" stroke-linecap="round" stroke-width="8"/>
-  <path d="M64 88v13" fill="none" stroke="#1f1811" stroke-linecap="round" stroke-width="8"/>
-  <path d="M48 102h32" fill="none" stroke="#1f1811" stroke-linecap="round" stroke-width="8"/>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="80" y1="80" x2="944" y2="944" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#060A1A"/>
+      <stop offset="1" stop-color="#020611"/>
+    </linearGradient>
+
+    <linearGradient id="barFill" x1="180" y1="180" x2="844" y2="820" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#A8FFFF"/>
+      <stop offset="1" stop-color="#45D7E8"/>
+    </linearGradient>
+
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feColorMatrix in="b" type="matrix"
+        values="1 0 0 0 0
+                0 1 0 0 0.82
+                0 0 1 0 0.9
+                0 0 0 0.7 0"/>
+    </filter>
+
+    <clipPath id="clip">
+      <rect x="96" y="96" width="832" height="832" rx="196"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#clip)">
+    <rect x="96" y="96" width="832" height="832" rx="196" fill="url(#bg)"/>
+
+    <ellipse cx="500" cy="250" rx="230" ry="110" fill="#0D2340" opacity="0.35"/>
+    <ellipse cx="520" cy="780" rx="290" ry="130" fill="#071425" opacity="0.5"/>
+
+    <!-- background horizon bars -->
+    <g opacity="0.16">
+      <rect x="180" y="230" width="664" height="28" rx="14" fill="#41556A"/>
+      <rect x="180" y="314" width="664" height="28" rx="14" fill="#41556A"/>
+      <rect x="180" y="398" width="664" height="28" rx="14" fill="#41556A"/>
+      <rect x="180" y="482" width="664" height="28" rx="14" fill="#41556A"/>
+      <rect x="180" y="566" width="664" height="28" rx="14" fill="#41556A"/>
+      <rect x="180" y="650" width="664" height="28" rx="14" fill="#41556A"/>
+      <rect x="180" y="734" width="664" height="28" rx="14" fill="#41556A"/>
+    </g>
+
+    <!-- clean stepped S:
+         long top, short middle, long bottom -->
+    <g filter="url(#glow)">
+      <!-- top stroke -->
+      <rect x="236" y="230" width="540" height="28" rx="14" fill="url(#barFill)"/>
+      <rect x="276" y="314" width="410" height="28" rx="14" fill="url(#barFill)"/>
+
+      <!-- middle pinch -->
+      <rect x="394" y="398" width="220" height="28" rx="14" fill="url(#barFill)"/>
+      <rect x="444" y="482" width="180" height="28" rx="14" fill="url(#barFill)"/>
+
+      <!-- bottom stroke -->
+      <rect x="362" y="566" width="310" height="28" rx="14" fill="url(#barFill)"/>
+      <rect x="254" y="650" width="492" height="28" rx="14" fill="url(#barFill)"/>
+      <rect x="220" y="734" width="560" height="28" rx="14" fill="url(#barFill)"/>
+    </g>
+
+    <!-- crisp inner highlight -->
+    <g opacity="0.9">
+      <rect x="236" y="239" width="540" height="8" rx="4" fill="#E0FFFF"/>
+      <rect x="276" y="323" width="410" height="8" rx="4" fill="#E0FFFF"/>
+      <rect x="394" y="407" width="220" height="8" rx="4" fill="#E0FFFF"/>
+      <rect x="444" y="491" width="180" height="8" rx="4" fill="#E0FFFF"/>
+      <rect x="362" y="575" width="310" height="8" rx="4" fill="#E0FFFF"/>
+      <rect x="254" y="659" width="492" height="8" rx="4" fill="#E0FFFF"/>
+      <rect x="220" y="743" width="560" height="8" rx="4" fill="#E0FFFF"/>
+    </g>
+  </g>
 </svg>

@@ -28,8 +28,7 @@ if [[ ! -f "${SESSION_MARKER}" ]]; then
   exit 0
 fi
 
-APP_PID="$(cat "${SESSION_MARKER}" 2>/dev/null || echo 0)"
-if ! [[ "${APP_PID}" =~ ^[0-9]+$ ]] || ! kill -0 "${APP_PID}" 2>/dev/null; then
+if ! busctl --user status io.github.saywrite.Host &>/dev/null; then
   exit 0
 fi
 
