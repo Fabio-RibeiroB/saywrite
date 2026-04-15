@@ -8,12 +8,13 @@ The next phase is not new architecture. It is release readiness and polish.
 
 - The GTK app exists and acts as the setup and diagnostics surface.
 - `saywrite-host` owns the real dictation workflow.
-- Global hotkey dictation works through the host path.
+- Global hotkey dictation works through the host path while SayWrite is running.
 - Local transcription works end to end.
 - Cloud transcription exists.
 - Direct insertion works on the currently validated GNOME Wayland setup.
 - Clipboard and notification fallbacks exist for degraded environments.
 - Host daemon lifecycle is now tied to the GUI (starts on app launch, stops on close).
+- Closing the app should disarm host activation so the companion does not wake back up after quit.
 - Mic capture hardened: PipeWire source detection, RMS silence rejection.
 - IBus path hardened: race condition fixed, retry logic, comprehensive logging.
 - Setup/install concerns are now split out of transport code (`host_setup.rs` vs `host_integration.rs`).
@@ -42,7 +43,7 @@ The Flatpak app is only half of the full direct-typing story. The host companion
 
 **Status: DONE**
 - In-app installation via `host_setup::install_host_companion()` works end-to-end
-- Settings → Diagnostics shows "Enable Direct Typing" button when source repo is available
+- Settings opens with an Output mode section that shows Clipboard Mode vs Direct Typing clearly and exposes the in-app "Enable" action when installation is available
 - Fallback instructions shown for packaged/Flatpak-only users
 - Host daemon lifecycle now tied to GUI: starts on app launch, stops on app close
 - `scripts/install-host.sh` is fallback, not primary story
@@ -183,13 +184,13 @@ Success bar:
 4. ✅ **Improve onboarding honest reporting** (DONE: onboarding shows real mode from host_status)
 5. ✅ **Expand host regression tests** (DONE: service error sanitization + debounce tests)
 6. → **Keep structural boundaries clean** (tighten app/service lifecycle; main_window split done — `app.rs` is post-v1)
-7. ✅ **Integrate the `ui-improvements` worktree carefully** (DONE: WaveformBox, Revealers, inline setup actions, insertion chip, retry button, SaveToast, cancel download)
+7. ✅ **Integrate the `ui-improvements` worktree carefully** (DONE: WaveformBox, Revealers, inline setup actions, insertion chip, transcript dismissal action, SaveToast, cancel download)
 
 ## Release Goal
 
 SayWrite v1.0 is ready for a first public release. All blockers are cleared:
 
-- ✅ hotkey dictation works without opening the app (when host daemon is running)
+- ✅ hotkey dictation works while SayWrite is running, and closing the app disarms the host companion
 - ✅ direct insertion works reliably on GNOME Wayland via IBus
 - ✅ supported platform is explicitly documented (GNOME Wayland; others get clipboard fallback)
 - ✅ degraded modes are honest and understandable (UI reports Direct Typing / Clipboard / Notification / Offline)
@@ -217,6 +218,7 @@ The current IBus insertion path is GNOME-specific. Expanding the supported matri
 ### Longer term
 - KDE Plasma (Wayland): `ydotool` or KDE-specific input injection
 - Tray icon + quick controls (non-blocking, post-beta)
+- Custom vocabulary and context hints for product names, technical terms, and user-specific words (for example `SayWrite`, `daemon`, and domain terms)
 - More aggressive transcript cleanup customization
 - Application-aware formatting profiles
 

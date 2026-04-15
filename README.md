@@ -12,7 +12,7 @@ SayWrite has two user-facing modes:
 
 Works with the Flatpak app alone. No host setup required.
 
-- press the dictation shortcut
+- press the dictation hotkey
 - speak
 - SayWrite records, transcribes, cleans up your text, and copies it to the clipboard
 - paste into any application
@@ -23,11 +23,13 @@ This is the default mode and works on any desktop where the Flatpak runs.
 
 Requires the host companion (`saywrite-host`) installed alongside the Flatpak.
 
-- press the dictation shortcut
+- press the dictation hotkey
 - speak
 - SayWrite types the cleaned text directly into the focused application
 
-Direct typing is hotkey-driven — you do not need to keep the app open or switch focus. The app walks you through enabling this mode from its settings screen.
+Direct typing is hotkey-driven while SayWrite is running — you do not need to keep the window focused. Closing the app disarms the host companion so dictation does not keep running in the background.
+
+You can replay onboarding from Settings at any time if you want to re-check microphone, hotkey, or mode setup.
 
 ## Current Support Status
 
@@ -167,7 +169,7 @@ The current app and host workflow are Rust-native. The supported development pat
 Current state:
 - GTK app exists as the setup and diagnostics surface
 - `saywrite-host` owns the real dictation workflow
-- global hotkey dictation works through the host path
+- global hotkey dictation works through the host path while SayWrite is running
 - local and cloud transcription both work end-to-end
 - direct insertion works on the validated GNOME Wayland setup
 - clipboard and notification fallbacks work on other environments

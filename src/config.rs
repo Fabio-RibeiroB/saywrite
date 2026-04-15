@@ -6,7 +6,8 @@ use std::{
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-const APP_DIR_NAME: &str = "saywrite";
+pub const APP_DIR_NAME: &str = "saywrite";
+pub const HOST_SESSION_MARKER_NAME: &str = "host-session.pid";
 const SETTINGS_FILE_NAME: &str = "settings.json";
 const DEFAULT_CLOUD_API_BASE: &str = "https://api.openai.com/v1";
 const LEGACY_SHORTCUT: &str = "F8";
@@ -180,6 +181,16 @@ pub fn data_dir() -> PathBuf {
     let mut base = dirs::data_dir().unwrap_or_else(|| PathBuf::from(Path::new(".local/share")));
     base.push(APP_DIR_NAME);
     base
+}
+
+pub fn state_dir() -> PathBuf {
+    let mut base = dirs::state_dir().unwrap_or_else(|| PathBuf::from(Path::new(".local/state")));
+    base.push(APP_DIR_NAME);
+    base
+}
+
+pub fn host_session_marker_path() -> PathBuf {
+    state_dir().join(HOST_SESSION_MARKER_NAME)
 }
 
 pub fn local_models_dir() -> PathBuf {

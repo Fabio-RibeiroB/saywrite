@@ -3,11 +3,19 @@ mod input;
 mod insertion;
 mod service;
 
+use std::fs;
+
 use anyhow::{Context, Result};
+use saywrite::config;
 use tokio::signal::unix::{signal, SignalKind};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if !app_session_is_active() {
+        eprintln!("saywrite-host refusing to start because SayWrite is not running");
+        return Ok(());
+    }
+
     eprintln!("saywrite-host starting");
     init_ibus().await;
 
@@ -37,6 +45,20 @@ async fn main() -> Result<()> {
 
     eprintln!("saywrite-host shutting down");
     Ok(())
+}
+
+fn app_session_is_active() -> bool {
+    let marker_path = config::host_session_marker_path();
+    let pid_text = match fs::read_to_string(&marker_path) {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    let pid = match pid_text.trim().parse::<u32>() {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+
+    std::path::Path::new(&format!("/proc/{pid}")).exists()
 }
 
 async fn init_ibus() {

@@ -55,6 +55,8 @@ When writing copy, diagnostics, or onboarding text, use these mode names. Do not
 - Host insertion now exposes explicit capability/result categories: direct typing, clipboard fallback, notification fallback, or unavailable.
 - On GNOME Wayland, host insertion prefers the SayWrite IBus engine bridge; on other setups it falls back to `wtype`, `xdotool`, clipboard tools, or notifications.
 - The GUI starts `saywrite-host` on launch and stops it on app shutdown.
+- Closing the app should disarm host-side activation so global shortcuts cannot wake the daemon back up after quit.
+- Settings can replay onboarding without wiping the rest of the app state.
 
 ## Current State
 
