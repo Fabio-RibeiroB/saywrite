@@ -59,9 +59,14 @@ impl SaveToast {
     }
 }
 
-pub fn build_inline_page<F>(settings: Rc<RefCell<AppSettings>>, on_back: F) -> gtk::Widget
+pub fn build_inline_page<F, G>(
+    settings: Rc<RefCell<AppSettings>>,
+    on_back: F,
+    on_replay_onboarding: G,
+) -> gtk::Widget
 where
     F: Fn() + 'static,
+    G: Fn() + 'static,
 {
     let header = adw::HeaderBar::new();
     let back_btn = gtk::Button::builder()
@@ -85,52 +90,15 @@ where
     page.add(&toast_group);
 
     let host_status = host_integration::host_status();
-    let host_setup = crate::host_setup::host_setup_status();
     let direct_typing_active = host_status
         .as_ref()
         .map(|status| status.insertion_capability == crate::host_api::INSERTION_CAPABILITY_TYPING)
         .unwrap_or(false);
 
-    let mode_group = adw::PreferencesGroup::builder()
-        .title("Output mode")
-        .description("Clipboard Mode copies text. Direct Typing needs the host companion outside the sandbox.")
-        .build();
-
-    let mode_status_row = adw::ActionRow::builder()
-        .title("Current mode")
-        .subtitle(if direct_typing_active {
-            "Direct Typing"
-        } else {
-            "Clipboard Mode"
-        })
-        .build();
-    mode_group.add(&mode_status_row);
-
-    let host_row = adw::ActionRow::builder()
-        .title("Host companion")
-        .subtitle(
-            host_status
-                .as_ref()
-                .map(|status| status.status.as_str())
-                .unwrap_or("Not running"),
-        )
-        .build();
-    mode_group.add(&host_row);
-
-    if let Some(status) = host_status.as_ref() {
-        let path_row = adw::ActionRow::builder()
-            .title("Delivery path")
-            .subtitle(format!(
-                "{} via {}",
-                crate::host_api::insertion_capability_label(&status.insertion_capability),
-                status.insertion_backend
-            ))
-            .build();
-        mode_group.add(&path_row);
-    } else if crate::host_setup::can_install_in_app() {
+    let add_direct_typing_install_controls = |mode_group: &adw::PreferencesGroup, subtitle: &str| {
         let install_row = adw::ActionRow::builder()
-            .title("Turn on Direct Typing")
-            .subtitle("Install the host companion to type directly into apps.")
+            .title("Direct Typing")
+            .subtitle(subtitle)
             .build();
 
         let install_progress_row = adw::ActionRow::builder()
@@ -139,7 +107,7 @@ where
             .build();
         install_progress_row.set_visible(false);
 
-        let install_btn = gtk::Button::with_label("Install");
+        let install_btn = gtk::Button::with_label("Enable");
         install_btn.set_valign(Align::Center);
         install_btn.add_css_class("suggested-action");
 
@@ -169,9 +137,10 @@ where
                             glib::ControlFlow::Continue
                         }
                         Ok(crate::host_setup::HostInstallUpdate::Done) => {
-                            btn.set_label("Installed");
+                            btn.set_label("Enabled");
+                            btn.set_sensitive(false);
                             btn.remove_css_class("suggested-action");
-                            install_row.set_subtitle("Host companion installed. Reopen Settings to confirm.");
+                            install_row.set_subtitle("Direct Typing is ready. Reopen Settings to confirm.");
                             install_progress_row.set_title("Done");
                             install_progress_row.set_subtitle("saywrite-host is running.");
                             glib::ControlFlow::Break
@@ -203,26 +172,89 @@ where
         install_row.add_suffix(&install_btn);
         mode_group.add(&install_row);
         mode_group.add(&install_progress_row);
+    };
+
+    let mode_group = adw::PreferencesGroup::builder()
+        .title("Output mode")
+        .description("Clipboard Mode copies text to the clipboard. Direct Typing places text directly into the active app after the host companion is installed.")
+        .build();
+
+    let mode_status_row = adw::ActionRow::builder()
+        .title("Current mode")
+        .subtitle(if direct_typing_active {
+            "Direct Typing"
+        } else {
+            "Clipboard Mode"
+        })
+        .build();
+    mode_group.add(&mode_status_row);
+
+    if let Some(status) = host_status.as_ref() {
+        if direct_typing_active {
+            let direct_typing_row = adw::ActionRow::builder()
+                .title("Direct Typing")
+                .subtitle("Enabled on this desktop")
+                .build();
+
+            let enabled_label = gtk::Label::builder()
+                .label("Enabled")
+                .halign(Align::Center)
+                .valign(Align::Center)
+                .build();
+            enabled_label.add_css_class("shortcut-pill");
+            direct_typing_row.add_suffix(&enabled_label);
+            mode_group.add(&direct_typing_row);
+        } else {
+            let status_text = match status.insertion_capability.as_str() {
+                crate::host_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY => {
+                    "Unavailable on this desktop. Clipboard Mode is active."
+                }
+                crate::host_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY => {
+                    "Unavailable on this desktop. SayWrite will show the result instead."
+                }
+                _ => "Unavailable on this desktop.",
+            };
+            let unavailable_row = adw::ActionRow::builder()
+                .title("Direct Typing")
+                .subtitle(status_text)
+                .build();
+            mode_group.add(&unavailable_row);
+        }
+    } else if crate::host_setup::can_install_in_app() {
+        add_direct_typing_install_controls(
+            &mode_group,
+            "Clipboard Mode is active. Install the host companion to place text directly into apps.",
+        );
     } else {
         let manual_row = adw::ActionRow::builder()
-            .title("Manual setup")
-            .subtitle("Install the host companion package outside the Flatpak to enable Direct Typing.")
+            .title("Direct Typing")
+            .subtitle("Clipboard Mode is active. Install the host companion package outside the Flatpak to enable Direct Typing.")
             .build();
         mode_group.add(&manual_row);
     }
 
-    if host_setup.binary_installed {
-        let install_state_row = adw::ActionRow::builder()
-            .title("Installation")
-            .subtitle(match (host_setup.systemd_service_installed, host_setup.dbus_service_installed) {
-                (true, true) => "Fully installed",
-                _ => "Partially installed — service files incomplete",
-            })
-            .build();
-        mode_group.add(&install_state_row);
-    }
-
     page.add(&mode_group);
+
+    // ── Shortcut ──────────────────────────────────────────────────────────────
+    let shortcut_group = adw::PreferencesGroup::builder()
+        .title("Shortcut")
+        .description("Press this key combination anywhere to start or stop dictation.")
+        .build();
+
+    let shortcut_row = adw::ActionRow::builder()
+        .title("Global shortcut")
+        .build();
+    let shortcut_label = gtk::Label::builder()
+        .label(&settings.borrow().global_shortcut_label)
+        .halign(Align::Center)
+        .valign(Align::Center)
+        .build();
+    shortcut_label.add_css_class("shortcut-pill");
+    shortcut_row.add_suffix(&shortcut_label);
+    shortcut_row.set_activatable(false);
+    shortcut_group.add(&shortcut_row);
+
+    page.add(&shortcut_group);
 
     // ── Transcription ─────────────────────────────────────────────────────────
     let transcription_group = adw::PreferencesGroup::builder()
@@ -263,7 +295,7 @@ where
 
     let mic_row = adw::ComboRow::builder()
         .title("Microphone")
-        .subtitle("Input device used for dictation recording")
+        .subtitle("Input device used for dictation recording. Best results come when the mic is close to your mouth.")
         .build();
     let labels: Vec<&str> = device_labels.iter().map(|s| s.as_str()).collect();
     mic_row.set_model(Some(&gtk::StringList::new(&labels)));
@@ -529,26 +561,24 @@ where
 
     page.add(&cloud_group);
 
-    // ── Shortcut ──────────────────────────────────────────────────────────────
-    let shortcut_group = adw::PreferencesGroup::builder()
-        .title("Shortcut")
-        .description("Press this key combination anywhere to start or stop dictation.")
+    // ── Onboarding ───────────────────────────────────────────────────────────
+    let onboarding_group = adw::PreferencesGroup::builder()
+        .title("Onboarding")
+        .description("Replay the first-run setup without editing files by hand.")
         .build();
 
-    let shortcut_row = adw::ActionRow::builder()
-        .title("Global shortcut")
+    let replay_row = adw::ActionRow::builder()
+        .title("Replay onboarding")
+        .subtitle("Open the microphone, hotkey, and mode setup again.")
         .build();
-    let shortcut_label = gtk::Label::builder()
-        .label(&settings.borrow().global_shortcut_label)
-        .halign(Align::Center)
-        .valign(Align::Center)
-        .build();
-    shortcut_label.add_css_class("shortcut-pill");
-    shortcut_row.add_suffix(&shortcut_label);
-    shortcut_row.set_activatable(false);
-    shortcut_group.add(&shortcut_row);
+    let replay_btn = gtk::Button::with_label("Start");
+    replay_btn.set_valign(Align::Center);
+    replay_btn.add_css_class("suggested-action");
+    replay_btn.connect_clicked(move |_| on_replay_onboarding());
+    replay_row.add_suffix(&replay_btn);
+    onboarding_group.add(&replay_row);
 
-    page.add(&shortcut_group);
+    page.add(&onboarding_group);
 
     // ── Diagnostics ───────────────────────────────────────────────────────────
     let probe = probe_runtime(&settings.borrow());

@@ -130,7 +130,7 @@ fn mic_page(carousel: adw::Carousel, settings: Rc<RefCell<AppSettings>>) -> gtk:
     title.add_css_class("title-2");
 
     let body = gtk::Label::builder()
-        .label("SayWrite records through your default microphone. Select your mic, then tap Test Microphone.")
+        .label("SayWrite records through your default microphone. Select your mic, keep it close to your mouth, then tap Test Microphone.")
         .wrap(true)
         .justify(gtk::Justification::Center)
         .build();
@@ -271,7 +271,7 @@ fn mic_page(carousel: adw::Carousel, settings: Rc<RefCell<AppSettings>>) -> gtk:
                         }
                         Ok(false) => {
                             status_label.set_label(
-                                "No audio detected. Make sure your microphone is unmuted and try again.",
+                                "No audio detected. Make sure your microphone is unmuted, and move it closer to your mouth if needed.",
                             );
                             recording_label_for_value.set_label("No audio detected");
                             test_btn.set_sensitive(true);
@@ -334,7 +334,7 @@ fn shortcut_page(
     icon.add_css_class("onboarding-icon");
 
     let title = gtk::Label::builder()
-        .label("One shortcut, not a maze")
+        .label("One hotkey, not a maze")
         .wrap(true)
         .justify(gtk::Justification::Center)
         .build();
@@ -347,14 +347,14 @@ fn shortcut_page(
     let (mode_label, body_text, hint_text) = if direct_typing {
         (
             "Direct Typing",
-            "Press the shortcut to start dictating. Press it again to stop. Your words land directly in the active text field — no clipboard, no pasting.",
+            "Press the hotkey to start dictating. Press it again to stop. Your words land directly in the active text field — no clipboard, no pasting.",
             None,
         )
     } else {
         (
             "Clipboard Mode",
-            "Press the shortcut to start dictating. Press it again to stop. Your words are copied to the clipboard — paste them where you need.",
-            Some("To enable Direct Typing, visit Settings → Enable Direct Typing after setup."),
+            "Press the hotkey to start dictating. Press it again to stop. Your words are copied to the clipboard — paste them where you need.",
+            Some("To enable Direct Typing, open Settings and install the host companion after setup."),
         )
     };
 

@@ -109,7 +109,7 @@ pub(super) fn build_body(
     activity_revealer.set_child(Some(&activity_stack));
 
     // State label
-    let state_label = gtk::Label::new(Some("Ready"));
+    let state_label = gtk::Label::new(Some("Press your hotkey to start dictation"));
     state_label.add_css_class("state-label");
     state_label.set_margin_top(12);
 
@@ -231,37 +231,20 @@ pub(super) fn build_body(
         });
     }
 
-    // Action row (copy + type + retry)
+    // Action row (copy + dismiss)
     let copy_btn = gtk::Button::with_label("Copy to Clipboard");
     copy_btn.add_css_class("pill");
 
-    let type_btn = gtk::Button::with_label("Type into App");
-    type_btn.add_css_class("pill");
-    type_btn.set_visible(false);
-    let host_status = host_integration::host_status();
-    if let Some(status) = host_status.as_ref() {
-        match status.insertion_capability.as_str() {
-            host_api::INSERTION_CAPABILITY_TYPING => {
-                type_btn.set_visible(true);
-                type_btn.set_label("Type into App");
-            }
-            host_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY => {
-                type_btn.set_visible(true);
-                type_btn.set_label("Show Result");
-            }
-            _ => {}
-        }
-    }
+    let done_btn = gtk::Button::with_label("Done");
+    done_btn.add_css_class("pill");
 
-    let retry_btn = gtk::Button::with_label("Retry");
-    retry_btn.add_css_class("pill");
+    let host_status = host_integration::host_status();
 
     let action_row = gtk::Box::new(Orientation::Horizontal, 16);
     action_row.set_halign(Align::Center);
     action_row.set_margin_top(16);
     action_row.append(&copy_btn);
-    action_row.append(&type_btn);
-    action_row.append(&retry_btn);
+    action_row.append(&done_btn);
 
     let action_revealer = gtk::Revealer::new();
     action_revealer.set_transition_type(gtk::RevealerTransitionType::Crossfade);
@@ -269,11 +252,12 @@ pub(super) fn build_body(
     action_revealer.set_reveal_child(false);
     action_revealer.set_child(Some(&action_row));
 
-    // Dictate button
-    let dictate_btn = gtk::Button::with_label("  Start Dictation  ");
+    // Dictation control: the hotkey starts it, this button only stops it once active.
+    let dictate_btn = gtk::Button::with_label("  Press Hotkey to Start  ");
     dictate_btn.add_css_class("suggested-action");
     dictate_btn.add_css_class("pill");
     dictate_btn.add_css_class("record-button");
+    dictate_btn.set_sensitive(false);
     dictate_btn.set_halign(Align::Center);
     dictate_btn.set_margin_top(36);
 
@@ -294,7 +278,6 @@ pub(super) fn build_body(
         action_revealer: action_revealer.clone(),
         dictate_btn: dictate_btn.clone(),
         copy_btn: copy_btn.clone(),
-        type_btn: type_btn.clone(),
         insertion_chip: insertion_chip.clone(),
         last_cleaned: Rc::new(RefCell::new(String::new())),
         is_listening: Rc::new(RefCell::new(false)),
@@ -313,12 +296,15 @@ pub(super) fn build_body(
     outer.append(&action_revealer);
     outer.append(&dictate_btn);
 
-    // --- Dictate button ---
+    // --- Dictation control button ---
     {
         let ui = ui.clone();
         dictate_btn.clone().connect_clicked(move |_| {
-            let starting = !*ui.is_listening.borrow();
-            ui.begin_toggle(starting);
+            if !*ui.is_listening.borrow() {
+                return;
+            }
+
+            ui.begin_toggle(false);
 
             let (tx, rx) = mpsc::channel::<Result<String, String>>();
             thread::spawn(move || {
@@ -333,7 +319,7 @@ pub(super) fn build_body(
                 ASYNC_POLL_INTERVAL,
                 move |result| {
                     match result {
-                        Ok(_) => ui_for_value.apply_toggle_success(starting),
+                        Ok(_) => ui_for_value.apply_toggle_success(false),
                         Err(err) => ui_for_value.apply_toggle_error(&err),
                     }
                     glib::ControlFlow::Break
@@ -354,10 +340,10 @@ pub(super) fn build_body(
         });
     }
 
-    // --- Retry button ---
+    // --- Done button ---
     {
         let ui = ui.clone();
-        retry_btn.connect_clicked(move |_| ui.dismiss_transcript());
+        done_btn.connect_clicked(move |_| ui.dismiss_transcript());
     }
 
     // --- Inline model download button ---
@@ -504,48 +490,6 @@ pub(super) fn build_body(
         }
     }
 
-    // --- Type into app button ---
-    {
-        let ui = ui.clone();
-        type_btn.clone().connect_clicked(move |btn| {
-            let text = ui.last_cleaned.borrow().clone();
-            if text.is_empty() {
-                return;
-            }
-            ui.start_send_to_app();
-
-            let (tx, rx) = mpsc::channel::<Result<String, String>>();
-            let text_for_send = text.clone();
-            thread::spawn(move || {
-                let result =
-                    host_integration::send_text(&text_for_send).map_err(|e| e.to_string());
-                let _ = tx.send(result);
-            });
-
-            let ui_for_value = ui.clone();
-            let ui_for_disconnect = ui.clone();
-            let btn = btn.clone();
-            let text_for_value = text.clone();
-            let text_for_disconnect = text.clone();
-            async_poll::poll_receiver(
-                rx,
-                ASYNC_POLL_INTERVAL,
-                move |result| {
-                    ui_for_value.finish_send_to_app(result, &text_for_value);
-                    btn.set_sensitive(true);
-                    glib::ControlFlow::Break
-                },
-                move || {
-                    ui_for_disconnect.finish_send_to_app(
-                        Err("The host companion disconnected.".into()),
-                        &text_for_disconnect,
-                    );
-                    glib::ControlFlow::Break
-                },
-            );
-        });
-    }
-
     // --- Keyboard shortcuts ---
     {
         let key_controller = gtk::EventControllerKey::new();
@@ -606,12 +550,12 @@ pub(super) fn refresh_window_state(ui: &MainWindowUi, settings: &Rc<RefCell<AppS
 
     if host_status.is_none() {
         ui.set_setup_state(
+            "Press your hotkey to start dictation",
             "Clipboard Mode is active",
-            "Enable Direct Typing",
             if host_setup.binary_installed {
                 "The host companion looks installed, but SayWrite cannot reach it yet. Open Settings to reconnect it."
             } else {
-                "Open Settings to install the host companion and switch from Clipboard Mode to Direct Typing."
+                "Open Settings to install the host companion if you want Direct Typing. Clipboard Mode still works with your hotkey."
             },
             SetupAction::OpenSettings,
             true,
@@ -661,14 +605,24 @@ pub(super) fn refresh_window_state(ui: &MainWindowUi, settings: &Rc<RefCell<AppS
 
     if let Some(status) = host_status {
         if !host_api::supports_direct_typing(&status.insertion_capability) {
-            ui.set_setup_state(
-                "Clipboard Mode is active",
-                "Direct Typing is unavailable here",
-                &format!(
-                    "SayWrite is using {} via {}. Open Settings for Direct Typing status and setup.",
-                    host_api::insertion_capability_label(&status.insertion_capability),
-                    status.insertion_backend
+            let (state_label, detail) = match status.insertion_capability.as_str() {
+                host_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY => (
+                    "Clipboard Mode is active",
+                    "Clipboard Mode is active on this desktop. Open Settings for Direct Typing status and setup.",
                 ),
+                host_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY => (
+                    "Direct Typing is unavailable here",
+                    "This desktop can only show the result instead of typing it directly. Open Settings for details.",
+                ),
+                _ => (
+                    "Direct Typing is unavailable here",
+                    "Direct Typing is unavailable on this desktop. Open Settings for setup details.",
+                ),
+            };
+            ui.set_setup_state(
+                state_label,
+                "Direct Typing is unavailable here",
+                detail,
                 SetupAction::OpenSettings,
                 false,
             );

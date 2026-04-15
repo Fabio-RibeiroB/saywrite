@@ -6,7 +6,10 @@ use std::{cell::RefCell, rc::Rc};
 
 use adw::prelude::*;
 
-use crate::{config::AppSettings, ui::preferences};
+use crate::{
+    config::AppSettings,
+    ui::{onboarding, preferences},
+};
 
 pub fn present(app: &adw::Application, settings: Rc<RefCell<AppSettings>>) {
     let window = adw::ApplicationWindow::builder()
@@ -32,12 +35,34 @@ pub fn present(app: &adw::Application, settings: Rc<RefCell<AppSettings>>) {
     toolbar.set_content(Some(&widgets::build_body(&window, &stack, settings.clone(), insertion_chip)));
     stack.add_named(&toolbar, Some("main"));
 
-    let settings_page = preferences::build_inline_page(settings, {
-        let stack = stack.clone();
-        move || {
-            stack.set_visible_child_name("main");
-        }
-    });
+    let settings_page = preferences::build_inline_page(
+        settings.clone(),
+        {
+            let stack = stack.clone();
+            move || {
+                stack.set_visible_child_name("main");
+            }
+        },
+        {
+            let app = app.clone();
+            let window = window.clone();
+            let settings = settings.clone();
+            move || {
+                {
+                    let mut state = settings.borrow_mut();
+                    state.onboarding_complete = false;
+                    let _ = state.save();
+                }
+
+                let app_for_finish = app.clone();
+                let settings_for_finish = settings.clone();
+                onboarding::present(&app, settings.clone(), move || {
+                    present(&app_for_finish, settings_for_finish.clone());
+                });
+                window.close();
+            }
+        },
+    );
     stack.add_named(&settings_page, Some("settings"));
 
     window.set_content(Some(&stack));

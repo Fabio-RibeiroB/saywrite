@@ -118,7 +118,6 @@ pub(crate) struct MainWindowUi {
     pub(crate) action_revealer: gtk::Revealer,
     pub(crate) dictate_btn: gtk::Button,
     pub(crate) copy_btn: gtk::Button,
-    pub(crate) type_btn: gtk::Button,
     pub(crate) insertion_chip: gtk::Button,
     pub(crate) last_cleaned: Rc<RefCell<String>>,
     pub(crate) is_listening: Rc<RefCell<bool>>,
@@ -169,7 +168,8 @@ impl MainWindowUi {
             }
         }
         self.setup_revealer.set_reveal_child(true);
-        self.dictate_btn.set_sensitive(!blocks_dictation);
+        self.dictate_btn
+            .set_sensitive(!blocks_dictation && *self.is_listening.borrow());
     }
 
     pub(crate) fn clear_setup_state(&self) {
@@ -178,7 +178,8 @@ impl MainWindowUi {
         self.setup_settings_btn.set_visible(false);
         self.setup_api_row.set_visible(false);
         if !*self.is_listening.borrow() {
-            self.dictate_btn.set_sensitive(true);
+            self.dictate_btn.set_label("  Press Hotkey to Start  ");
+            self.dictate_btn.set_sensitive(false);
         }
     }
 
@@ -200,9 +201,12 @@ impl MainWindowUi {
             self.state_label.set_label("Transcript ready");
             self.dictate_btn.remove_css_class("destructive-action");
             self.dictate_btn.add_css_class("suggested-action");
-            self.dictate_btn.set_label("  Start Dictation  ");
+            self.dictate_btn.set_label("  Press Hotkey to Start  ");
+            self.dictate_btn.set_sensitive(false);
         }
-        self.dictate_btn.set_sensitive(true);
+        if starting {
+            self.dictate_btn.set_sensitive(true);
+        }
     }
 
     pub(crate) fn apply_toggle_error(&self, error: &str) {
@@ -213,8 +217,8 @@ impl MainWindowUi {
         self.state_label.set_label(&super::friendly_error_message(error));
         self.dictate_btn.remove_css_class("destructive-action");
         self.dictate_btn.add_css_class("suggested-action");
-        self.dictate_btn.set_label("  Retry Dictation  ");
-        self.dictate_btn.set_sensitive(true);
+        self.dictate_btn.set_label("  Press Hotkey to Start  ");
+        self.dictate_btn.set_sensitive(false);
     }
 
     pub(crate) fn apply_host_disconnect(&self) {
@@ -223,11 +227,11 @@ impl MainWindowUi {
         self.waveform.set_active(false);
         self.activity_revealer.set_reveal_child(false);
         self.state_label
-            .set_label("The host companion disconnected.");
+            .set_label("Press your hotkey to start dictation");
         self.dictate_btn.remove_css_class("destructive-action");
         self.dictate_btn.add_css_class("suggested-action");
-        self.dictate_btn.set_label("  Start Dictation  ");
-        self.dictate_btn.set_sensitive(true);
+        self.dictate_btn.set_label("  Press Hotkey to Start  ");
+        self.dictate_btn.set_sensitive(false);
         self.refresh_insertion_chip(None);
     }
 
@@ -258,12 +262,12 @@ impl MainWindowUi {
                 self.activity_revealer.set_reveal_child(false);
                 self.dictate_btn.remove_css_class("destructive-action");
                 self.dictate_btn.add_css_class("suggested-action");
-                self.dictate_btn.set_label("  Start Dictation  ");
-                self.dictate_btn.set_sensitive(true);
+                self.dictate_btn.set_label("  Press Hotkey to Start  ");
+                self.dictate_btn.set_sensitive(false);
                 self.state_label.set_label(if state == "done" {
                     "Transcript ready"
                 } else {
-                    "Ready"
+                    "Press your hotkey to start dictation"
                 });
             }
             _ => {}
@@ -286,7 +290,6 @@ impl MainWindowUi {
         *self.last_cleaned.borrow_mut() = final_text.to_string();
         let has_text = !final_text.is_empty();
         self.copy_btn.set_sensitive(has_text);
-        self.type_btn.set_sensitive(has_text);
         self.action_revealer.set_reveal_child(has_text);
     }
 
@@ -303,30 +306,6 @@ impl MainWindowUi {
         }
     }
 
-    pub(crate) fn start_send_to_app(&self) {
-        self.type_btn.set_sensitive(false);
-        self.state_label.set_label("Sending to focused app…");
-    }
-
-    pub(crate) fn finish_send_to_app(&self, result: Result<String, String>, text: &str) {
-        match result {
-            Ok(message) => self.state_label.set_label(&message),
-            Err(err) => {
-                if let Some(display) = gdk::Display::default() {
-                    display.clipboard().set_text(text);
-                    self.state_label.set_label(&format!(
-                        "{} Copied the text to your clipboard instead.",
-                        super::friendly_error_message(&err)
-                    ));
-                } else {
-                    self.state_label
-                        .set_label(&super::friendly_error_message(&err));
-                }
-            }
-        }
-        self.type_btn.set_sensitive(true);
-    }
-
     pub(crate) fn copy_last_cleaned_to_clipboard(&self) {
         let text = self.last_cleaned.borrow().clone();
         if let Some(display) = gdk::Display::default() {
@@ -339,7 +318,8 @@ impl MainWindowUi {
         self.transcript_revealer.set_reveal_child(false);
         self.action_revealer.set_reveal_child(false);
         if !*self.is_listening.borrow() {
-            self.state_label.set_label("Ready");
+            self.state_label
+                .set_label("Press your hotkey to start dictation");
         }
     }
 
