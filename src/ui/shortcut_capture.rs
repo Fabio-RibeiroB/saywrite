@@ -1,9 +1,11 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::Cell, cell::RefCell, rc::Rc};
 
 use gtk::{gdk, glib};
 use gtk::prelude::*;
 use libadwaita as adw;
 use adw::prelude::*;
+
+use crate::host_setup;
 
 pub fn present<F>(parent: &impl IsA<gtk::Widget>, current_shortcut: &str, on_apply: F)
 where
@@ -24,6 +26,7 @@ where
     }
 
     let captured = Rc::new(RefCell::new(None::<String>));
+    let saved = Rc::new(Cell::new(false));
 
     let title = gtk::Label::builder()
         .label("Press the shortcut you want to use")
@@ -93,8 +96,10 @@ where
     {
         let dialog = dialog.clone();
         let captured = captured.clone();
+        let saved = saved.clone();
         save_btn.connect_clicked(move |_| {
             if let Some(shortcut) = captured.borrow().clone() {
+                saved.set(true);
                 on_apply(shortcut);
                 dialog.close();
             }
@@ -131,6 +136,21 @@ where
         });
     }
     dialog.add_controller(controller);
+
+    // Temporarily disable the GNOME keybinding so the compositor does not
+    // swallow keys that are already bound (e.g. the current SayWrite hotkey).
+    // Restore the old binding on close unless the user saved a new one.
+    host_setup::suspend_gnome_shortcut();
+    {
+        let restore_shortcut = current_shortcut.to_owned();
+        let saved = saved.clone();
+        dialog.connect_close_request(move |_| {
+            if !saved.get() {
+                host_setup::restore_gnome_shortcut(&restore_shortcut);
+            }
+            glib::Propagation::Proceed
+        });
+    }
 
     dialog.present();
 }

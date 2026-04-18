@@ -372,22 +372,27 @@ fn shortcut_page(
     body.add_css_class("body");
 
     let shortcut_label = gtk::Label::builder()
-        .label("Choose your shortcut")
+        .label("Your shortcut")
         .halign(Align::Center)
         .build();
     shortcut_label.add_css_class("caption");
     shortcut_label.add_css_class("dim-label");
 
-    let shortcut_button = gtk::Button::with_label(&settings.borrow().global_shortcut_label);
-    shortcut_button.set_halign(Align::Center);
-    shortcut_button.add_css_class("pill");
+    let shortcut_pill = gtk::Label::builder()
+        .label(&settings.borrow().global_shortcut_label)
+        .halign(Align::Center)
+        .build();
+    shortcut_pill.add_css_class("shortcut-pill");
+
+    let change_btn = gtk::Button::with_label("Change");
+    change_btn.set_halign(Align::Center);
     {
         let settings = settings.clone();
-        let shortcut_button_for_handler = shortcut_button.clone();
-        shortcut_button.connect_clicked(move |btn| {
+        let shortcut_pill = shortcut_pill.clone();
+        change_btn.connect_clicked(move |btn| {
             let current = settings.borrow().global_shortcut_label.clone();
             let settings = settings.clone();
-            let shortcut_button = shortcut_button_for_handler.clone();
+            let shortcut_pill = shortcut_pill.clone();
             shortcut_capture::present(btn, &current, move |selected| {
                 let mut state = settings.borrow_mut();
                 if state.global_shortcut_label == selected {
@@ -396,11 +401,17 @@ fn shortcut_page(
                 state.global_shortcut_label = selected.clone();
                 let _ = state.save();
                 drop(state);
-                shortcut_button.set_label(&selected);
+                shortcut_pill.set_label(&selected);
                 let _ = crate::host_setup::apply_shortcut_change(&selected);
             });
         });
     }
+
+    let shortcut_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    shortcut_row.set_halign(Align::Center);
+    shortcut_row.set_valign(Align::Center);
+    shortcut_row.append(&shortcut_pill);
+    shortcut_row.append(&change_btn);
 
     let button = gtk::Button::with_label("Choose Engine");
     button.add_css_class("suggested-action");
@@ -426,7 +437,7 @@ fn shortcut_page(
         box_.append(&hint_label);
     }
     box_.append(&shortcut_label);
-    box_.append(&shortcut_button);
+    box_.append(&shortcut_row);
     box_.append(&button);
     box_
 }

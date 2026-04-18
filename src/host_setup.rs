@@ -124,28 +124,120 @@ pub fn install_host_companion() -> std::sync::mpsc::Receiver<Result<HostInstallU
 }
 
 pub fn apply_shortcut_change(shortcut: &str) -> Result<(), String> {
-    if let Some(script) = gnome_shortcut_script_path() {
-        let mut command = Command::new("bash");
-        command.arg(&script).arg(shortcut);
-        if let Some(dir) = script.parent() {
-            command.current_dir(dir);
-        }
-
-        match command.output() {
-            Ok(out) if out.status.success() => {}
-            Ok(out) => {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                let text = if !stderr.trim().is_empty() { stderr } else { stdout };
-                let snippet = text.lines().take(6).collect::<Vec<_>>().join("\n");
-                return Err(format!("Failed to apply desktop shortcut:\n{snippet}"));
+    if gnome_shortcuts_supported() {
+        // Inside Flatpak the bundled bash script cannot update the host dconf
+        // and would set an invalid command path (/app/…). Update the binding
+        // value directly via gsettings on the host instead.
+        if inside_flatpak() {
+            if let Err(e) = apply_gnome_binding_via_gsettings(shortcut) {
+                eprintln!("gsettings shortcut update failed (non-fatal): {e}");
             }
-            Err(err) => return Err(format!("Failed to run shortcut helper: {err}")),
+        } else if let Some(script) = gnome_shortcut_script_path() {
+            let mut command = Command::new("bash");
+            command.arg(&script).arg(shortcut);
+            if let Some(dir) = script.parent() {
+                command.current_dir(dir);
+            }
+
+            match command.output() {
+                Ok(out) if !out.status.success() => {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    let stdout = String::from_utf8_lossy(&out.stdout);
+                    let text = if !stderr.trim().is_empty() { stderr } else { stdout };
+                    let snippet = text.lines().take(6).collect::<Vec<_>>().join("\n");
+                    return Err(format!("Failed to apply desktop shortcut:\n{snippet}"));
+                }
+                Err(err) => return Err(format!("Failed to run shortcut helper: {err}")),
+                _ => {}
+            }
+        } else {
+            // No script available outside Flatpak — try gsettings directly.
+            if let Err(e) = apply_gnome_binding_via_gsettings(shortcut) {
+                eprintln!("gsettings shortcut update failed (non-fatal): {e}");
+            }
         }
     }
 
     restart_host_service();
     Ok(())
+}
+
+/// Convert "Super+Ctrl+Alt+Shift+A" → "<Super><Primary><Alt><Shift>a" for gsettings.
+fn shortcut_to_gnome_binding(label: &str) -> String {
+    let mut modifiers = String::new();
+    let mut key = String::new();
+
+    for part in label.split('+') {
+        match part.trim().to_ascii_lowercase().as_str() {
+            "super" => modifiers.push_str("<Super>"),
+            "ctrl" | "control" => modifiers.push_str("<Primary>"),
+            "alt" => modifiers.push_str("<Alt>"),
+            "shift" => modifiers.push_str("<Shift>"),
+            other if !other.is_empty() => key = other.to_string(),
+            _ => {}
+        }
+    }
+
+    if key.is_empty() {
+        key = "d".to_string();
+    }
+
+    format!("{modifiers}{key}")
+}
+
+/// Temporarily disable the GNOME custom keybinding so the capture dialog
+/// can receive all key combos.
+pub fn suspend_gnome_shortcut() {
+    if gnome_shortcuts_supported() {
+        let _ = set_gnome_binding_raw("");
+    }
+}
+
+/// Re-enable the GNOME custom keybinding with the given shortcut label.
+pub fn restore_gnome_shortcut(shortcut_label: &str) {
+    if gnome_shortcuts_supported() {
+        let binding = shortcut_to_gnome_binding(shortcut_label);
+        let _ = set_gnome_binding_raw(&binding);
+    }
+}
+
+fn apply_gnome_binding_via_gsettings(shortcut: &str) -> Result<(), String> {
+    let binding = shortcut_to_gnome_binding(shortcut);
+    set_gnome_binding_raw(&binding)
+}
+
+fn set_gnome_binding_raw(binding: &str) -> Result<(), String> {
+    const SCHEMA_KEY: &str = concat!(
+        "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding",
+        ":/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/saywrite-hands-free/"
+    );
+
+    let args: Vec<&str> = vec!["gsettings", "set", SCHEMA_KEY, "binding", binding];
+
+    let out = if inside_flatpak() {
+        let mut flatpak_args = vec!["--host"];
+        flatpak_args.extend_from_slice(&args);
+        Command::new("flatpak-spawn")
+            .args(&flatpak_args)
+            .output()
+            .map_err(|e| format!("flatpak-spawn: {e}"))?
+    } else {
+        Command::new(args[0])
+            .args(&args[1..])
+            .output()
+            .map_err(|e| format!("gsettings: {e}"))?
+    };
+
+    if out.status.success() {
+        Ok(())
+    } else {
+        let msg = String::from_utf8_lossy(&out.stderr).into_owned();
+        Err(msg)
+    }
+}
+
+fn inside_flatpak() -> bool {
+    Path::new("/.flatpak-info").exists()
 }
 
 pub fn host_install_instructions() -> String {

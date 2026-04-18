@@ -92,6 +92,10 @@ When writing copy, diagnostics, or onboarding text, use these mode names. Do not
 - Run `cargo check` before deeper changes.
 - Prefer checking both binaries when touching shared interfaces or host behavior.
 - No mocking of filesystem or GStreamer when real objects are practical.
+- The user runs SayWrite via the **installed Flatpak** (`io.github.fabio.SayWrite`), not the debug binary. After any source code change the user needs to test, rebuild and reinstall the Flatpak before asking them to try anything. Do not ask the user to test until the reinstall is complete.
+  ```
+  flatpak-builder --user --install --force-clean build-dir flatpak/io.github.fabio.SayWrite.json
+  ```
 
 ## Docs
 
