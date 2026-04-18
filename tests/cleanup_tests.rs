@@ -35,6 +35,12 @@ fn test_punctuation_spacing() {
 }
 
 #[test]
+fn test_punctuation_run_collapse() {
+    assert_eq!(cleanup_transcript("testing again, period"), "Testing again.");
+    assert_eq!(cleanup_transcript("wait question mark period"), "Wait?");
+}
+
+#[test]
 fn test_capitalization() {
     // First letter capitalized if alphabetic
     let result = cleanup_transcript("hello world");

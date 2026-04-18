@@ -2,11 +2,49 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HANDS_FREE_PATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/saywrite-hands-free/"
-HANDS_FREE_COMMAND="${ROOT_DIR}/scripts/run-global-dictation.sh"
+HANDS_FREE_COMMAND="${SELF_DIR}/run-global-dictation.sh"
 LEGACY_PATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/saywrite/"
 OLD_QUICK_PATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/saywrite-quick/"
+SHORTCUT_LABEL="${1:-Super+Alt+D}"
+BINDING="$(
+  python3 - <<'PY' "${SHORTCUT_LABEL}"
+import sys
+
+shortcut = sys.argv[1].strip()
+parts = [part for part in shortcut.split("+") if part]
+if not parts:
+    print("<Super><Alt>d")
+    raise SystemExit(0)
+
+modifiers = {
+    "super": "<Super>",
+    "alt": "<Alt>",
+    "ctrl": "<Primary>",
+    "control": "<Primary>",
+    "shift": "<Shift>",
+}
+
+binding = []
+key = None
+for part in parts:
+    token = part.strip()
+    lower = token.lower()
+    if lower in modifiers:
+        binding.append(modifiers[lower])
+    else:
+        key = token.lower()
+
+if not key:
+    key = "d"
+
+if key == "space":
+    key = "space"
+
+print("".join(binding) + key)
+PY
+)"
 
 # Replace SayWrite-owned entries deterministically so stale bindings do not survive.
 CURRENT="$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings)"
@@ -34,7 +72,7 @@ gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "$
 
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${HANDS_FREE_PATH} name "SayWrite Hands-Free Dictation"
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${HANDS_FREE_PATH} command "${HANDS_FREE_COMMAND}"
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${HANDS_FREE_PATH} binding "<Super><Alt>d"
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:${HANDS_FREE_PATH} binding "${BINDING}"
 
 echo "Installed GNOME shortcut:"
-echo "  Super+Alt+D -> ${HANDS_FREE_COMMAND}"
+echo "  ${SHORTCUT_LABEL} -> ${HANDS_FREE_COMMAND}"

@@ -8,7 +8,7 @@ use crate::{
     config::{AppSettings, ModelSize, ProviderMode},
     dictation, host_integration, model_installer,
     runtime::probe_runtime,
-    ui::async_poll,
+    ui::{async_poll, shortcut_capture},
 };
 
 const SETTINGS_SAVE_DEBOUNCE_MS: u64 = 300;
@@ -243,15 +243,53 @@ where
 
     let shortcut_row = adw::ActionRow::builder()
         .title("Global shortcut")
+        .subtitle("Click Change, then press the keys you want SayWrite to use.")
         .build();
+
     let shortcut_label = gtk::Label::builder()
         .label(&settings.borrow().global_shortcut_label)
         .halign(Align::Center)
         .valign(Align::Center)
         .build();
     shortcut_label.add_css_class("shortcut-pill");
+
+    let change_btn = gtk::Button::with_label("Change");
+    change_btn.set_valign(Align::Center);
+    {
+        let settings = settings.clone();
+        let save_toast = save_toast.clone();
+        let shortcut_label = shortcut_label.clone();
+        change_btn.connect_clicked(move |btn| {
+            let current = settings.borrow().global_shortcut_label.clone();
+            let settings = settings.clone();
+            let save_toast = save_toast.clone();
+            let shortcut_label = shortcut_label.clone();
+            shortcut_capture::present(btn, &current, move |selected| {
+            let mut state = settings.borrow_mut();
+            if state.global_shortcut_label == selected {
+                    return;
+            }
+            state.global_shortcut_label = selected.clone();
+            let save_result = state.save();
+            drop(state);
+
+            match save_result {
+                Ok(()) => {
+                        shortcut_label.set_label(&selected);
+                    match crate::host_setup::apply_shortcut_change(&selected) {
+                        Ok(()) => save_toast.show("Shortcut updated"),
+                        Err(_) => {
+                            save_toast.show("Shortcut saved");
+                        }
+                    }
+                }
+                Err(_) => save_toast.show("Could not save shortcut"),
+            }
+            });
+        });
+    }
     shortcut_row.add_suffix(&shortcut_label);
-    shortcut_row.set_activatable(false);
+    shortcut_row.add_suffix(&change_btn);
     shortcut_group.add(&shortcut_row);
 
     page.add(&shortcut_group);

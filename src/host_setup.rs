@@ -123,6 +123,31 @@ pub fn install_host_companion() -> std::sync::mpsc::Receiver<Result<HostInstallU
     rx
 }
 
+pub fn apply_shortcut_change(shortcut: &str) -> Result<(), String> {
+    if let Some(script) = gnome_shortcut_script_path() {
+        let mut command = Command::new("bash");
+        command.arg(&script).arg(shortcut);
+        if let Some(dir) = script.parent() {
+            command.current_dir(dir);
+        }
+
+        match command.output() {
+            Ok(out) if out.status.success() => {}
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                let text = if !stderr.trim().is_empty() { stderr } else { stdout };
+                let snippet = text.lines().take(6).collect::<Vec<_>>().join("\n");
+                return Err(format!("Failed to apply desktop shortcut:\n{snippet}"));
+            }
+            Err(err) => return Err(format!("Failed to run shortcut helper: {err}")),
+        }
+    }
+
+    restart_host_service();
+    Ok(())
+}
+
 pub fn host_install_instructions() -> String {
     let setup = host_setup_status();
     let mut steps = vec![
@@ -193,6 +218,21 @@ fn gnome_shortcut_command() -> Option<String> {
     Some("Create a GNOME custom shortcut that runs the SayWrite host toggle command.".into())
 }
 
+fn gnome_shortcut_script_path() -> Option<PathBuf> {
+    if let Some(root) = bundled_asset_root() {
+        let script = root.join("install-gnome-shortcut.sh");
+        let toggle_helper = root.join("run-global-dictation.sh");
+        if script.exists() && toggle_helper.exists() {
+            return Some(script);
+        }
+    }
+
+    repo_root().and_then(|root| {
+        let script = root.join("scripts/install-gnome-shortcut.sh");
+        script.exists().then_some(script)
+    })
+}
+
 fn bundled_asset_root() -> Option<PathBuf> {
     let path = PathBuf::from("/app/share/saywrite");
     path.join("install-host.sh").exists().then_some(path)
@@ -240,4 +280,16 @@ fn gnome_shortcuts_supported() -> bool {
     env::var("XDG_CURRENT_DESKTOP")
         .map(|value| value.to_ascii_lowercase().contains("gnome"))
         .unwrap_or(false)
+}
+
+fn restart_host_service() {
+    let _ = if Path::new("/.flatpak-info").exists() {
+        Command::new("flatpak-spawn")
+            .args(["--host", "systemctl", "--user", "restart", "saywrite-host.service"])
+            .status()
+    } else {
+        Command::new("systemctl")
+            .args(["--user", "restart", "saywrite-host.service"])
+            .status()
+    };
 }

@@ -58,6 +58,7 @@
         "install -Dm755 target/release/saywrite-host /app/libexec/saywrite-host",
         "install -Dm755 scripts/install-host.sh /app/share/saywrite/install-host.sh",
         "install -Dm755 scripts/install-gnome-shortcut.sh /app/share/saywrite/install-gnome-shortcut.sh",
+        "install -Dm755 scripts/run-global-dictation.sh /app/share/saywrite/run-global-dictation.sh",
         "install -Dm644 data/saywrite-host.service /app/share/saywrite/saywrite-host.service",
         "install -Dm644 data/io.github.saywrite.Host.service /app/share/saywrite/io.github.saywrite.Host.service",
         "install -Dm644 data/io.github.fabio.SayWrite.desktop /app/share/applications/io.github.fabio.SayWrite.desktop",

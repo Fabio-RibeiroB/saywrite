@@ -23,6 +23,7 @@ pub fn cleanup_transcript(text: &str) -> String {
     cleaned = remove_fillers(&cleaned);
     cleaned = collapse_whitespace(&cleaned);
     cleaned = trim_space_before_punctuation(&cleaned);
+    cleaned = collapse_punctuation_runs(&cleaned);
     cleaned = cleaned.replace("__PARAGRAPH_BREAK__", "\n\n");
     cleaned = normalize_paragraph_spacing(&cleaned);
 
@@ -113,6 +114,41 @@ fn trim_space_before_punctuation(input: &str) -> String {
     }
 
     output.trim().to_string()
+}
+
+fn collapse_punctuation_runs(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut run = String::new();
+
+    for ch in input.chars() {
+        if matches!(ch, ',' | '.' | ';' | ':' | '!' | '?') {
+            run.push(ch);
+            continue;
+        }
+
+        if !run.is_empty() {
+            output.push(select_punctuation_for_run(&run));
+            run.clear();
+        }
+
+        output.push(ch);
+    }
+
+    if !run.is_empty() {
+        output.push(select_punctuation_for_run(&run));
+    }
+
+    output
+}
+
+fn select_punctuation_for_run(run: &str) -> char {
+    for preferred in ['?', '!', '.', ';', ':', ','] {
+        if run.contains(preferred) {
+            return preferred;
+        }
+    }
+
+    '.'
 }
 
 fn normalize_paragraph_spacing(input: &str) -> String {

@@ -20,7 +20,7 @@ use crate::{
     dictation::{build_capture_args, list_input_devices},
     host_api, host_integration,
     model_installer,
-    ui::async_poll,
+    ui::{async_poll, shortcut_capture},
 };
 
 const MIC_TEST_MIN_BYTES: u64 = 100;
@@ -371,11 +371,36 @@ fn shortcut_page(
         .build();
     body.add_css_class("body");
 
-    let pill = gtk::Label::builder()
-        .label(&settings.borrow().global_shortcut_label)
+    let shortcut_label = gtk::Label::builder()
+        .label("Choose your shortcut")
         .halign(Align::Center)
         .build();
-    pill.add_css_class("shortcut-pill");
+    shortcut_label.add_css_class("caption");
+    shortcut_label.add_css_class("dim-label");
+
+    let shortcut_button = gtk::Button::with_label(&settings.borrow().global_shortcut_label);
+    shortcut_button.set_halign(Align::Center);
+    shortcut_button.add_css_class("pill");
+    {
+        let settings = settings.clone();
+        let shortcut_button_for_handler = shortcut_button.clone();
+        shortcut_button.connect_clicked(move |btn| {
+            let current = settings.borrow().global_shortcut_label.clone();
+            let settings = settings.clone();
+            let shortcut_button = shortcut_button_for_handler.clone();
+            shortcut_capture::present(btn, &current, move |selected| {
+                let mut state = settings.borrow_mut();
+                if state.global_shortcut_label == selected {
+                    return;
+                }
+                state.global_shortcut_label = selected.clone();
+                let _ = state.save();
+                drop(state);
+                shortcut_button.set_label(&selected);
+                let _ = crate::host_setup::apply_shortcut_change(&selected);
+            });
+        });
+    }
 
     let button = gtk::Button::with_label("Choose Engine");
     button.add_css_class("suggested-action");
@@ -400,7 +425,8 @@ fn shortcut_page(
         hint_label.add_css_class("dim-label");
         box_.append(&hint_label);
     }
-    box_.append(&pill);
+    box_.append(&shortcut_label);
+    box_.append(&shortcut_button);
     box_.append(&button);
     box_
 }

@@ -96,9 +96,9 @@ where
             "--retry-delay",
             "2",
             "-o",
-            &part_path.to_string_lossy().into_owned(),
-            &url,
         ])
+        .arg(&part_path)
+        .arg(&url)
         .spawn()
         .context("curl is required for model downloads but was not found")?;
 
