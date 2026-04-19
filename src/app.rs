@@ -56,9 +56,10 @@ fn load_css() {
 }
 
 fn start_host_daemon() {
+    run_user_systemctl(&["unmask", "saywrite-host.service"]);
+    run_user_systemctl(&["start", "saywrite-host.service"]);
+
     thread::spawn(|| {
-        run_user_systemctl(&["unmask", "saywrite-host.service"]);
-        run_user_systemctl(&["start", "saywrite-host.service"]);
         // Self-heal the GNOME hands-free keybinding on every launch: on
         // fresh Flatpak installs nothing else sets the command path, and
         // previous versions could leave the binding field empty after a

@@ -325,8 +325,8 @@ fn find_repo_root_for_dev() -> Option<PathBuf> {
 
 /// Make the GNOME custom keybinding a complete, working entry:
 /// ensure the path is in the master list (drop legacy siblings), name +
-/// command + binding are all set, and verify the binding is non-empty
-/// after the write. Safe to call on every app start.
+/// command + binding are all set, and verify the binding matches the
+/// expected value after the write. Safe to call on every app start.
 pub fn ensure_gnome_shortcut(label: &str) -> Result<(), String> {
     if !gnome_shortcuts_supported() {
         return Ok(());
@@ -362,8 +362,11 @@ pub fn ensure_gnome_shortcut(label: &str) -> Result<(), String> {
     set_gnome_keybinding_field("binding", &binding)?;
 
     let actual = get_gnome_keybinding_field("binding").unwrap_or_default();
-    if actual.is_empty() {
-        return Err("GNOME accepted the keybinding write but binding is still empty".into());
+    if actual != binding {
+        return Err(format!(
+            "GNOME accepted the keybinding write but binding is {:?}, expected {:?}",
+            actual, binding
+        ));
     }
     Ok(())
 }
@@ -374,10 +377,12 @@ pub fn self_heal_gnome_shortcut(label: &str) {
     if !gnome_shortcuts_supported() {
         return;
     }
+    let expected_binding = shortcut_to_gnome_binding(label);
     let current_binding = get_gnome_keybinding_field("binding").unwrap_or_default();
     let current_command = get_gnome_keybinding_field("command").unwrap_or_default();
     let expected_command = hands_free_command_path();
     let needs_fix = current_binding.is_empty()
+        || current_binding != expected_binding
         || current_command.is_empty()
         || expected_command
             .as_deref()

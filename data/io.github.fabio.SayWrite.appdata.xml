@@ -38,6 +38,15 @@
   </recommends>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.3.5" date="2026-04-19">
+      <description>
+        <p>Hotkey repair and host startup reliability fixes.</p>
+        <ul>
+          <li>Start the host companion before the main window subscribes to D-Bus updates, avoiding a launch race that could leave Direct Typing unavailable until restart</li>
+          <li>GNOME shortcut self-heal now repairs stale non-empty bindings when the saved shortcut changes, so the real hotkey stays aligned with the in-app setting</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.4" date="2026-04-19">
       <description>
         <p>Click-to-dictate button for users without a working hotkey.</p>
