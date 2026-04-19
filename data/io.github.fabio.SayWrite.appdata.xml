@@ -38,6 +38,14 @@
   </recommends>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.3.4" date="2026-04-19">
+      <description>
+        <p>Click-to-dictate button for users without a working hotkey.</p>
+        <ul>
+          <li>Main window's dictation button is now clickable to start and stop dictation, so users on desktops where the GNOME shortcut fallback can't be installed still have a working path to dictation with clipboard delivery</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.3" date="2026-04-19">
       <description>
         <p>Dictation hotkey now works out of the box.</p>

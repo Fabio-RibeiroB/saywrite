@@ -252,8 +252,10 @@ pub(super) fn build_body(
     action_revealer.set_reveal_child(false);
     action_revealer.set_child(Some(&action_row));
 
-    // Dictation control: the hotkey starts it, this button only stops it once active.
-    let dictate_btn = gtk::Button::with_label("  Press Hotkey to Start  ");
+    // Dictation control: clickable fallback for users whose hotkey isn't
+    // working (non-GNOME, portal unavailable). Toggles dictation via the
+    // same D-Bus call the hotkey uses.
+    let dictate_btn = gtk::Button::with_label("  Press Hotkey or Click to Start  ");
     dictate_btn.add_css_class("suggested-action");
     dictate_btn.add_css_class("pill");
     dictate_btn.add_css_class("record-button");
@@ -300,11 +302,8 @@ pub(super) fn build_body(
     {
         let ui = ui.clone();
         dictate_btn.clone().connect_clicked(move |_| {
-            if !*ui.is_listening.borrow() {
-                return;
-            }
-
-            ui.begin_toggle(false);
+            let starting = !*ui.is_listening.borrow();
+            ui.begin_toggle(starting);
 
             let (tx, rx) = mpsc::channel::<Result<String, String>>();
             thread::spawn(move || {
@@ -319,7 +318,7 @@ pub(super) fn build_body(
                 ASYNC_POLL_INTERVAL,
                 move |result| {
                     match result {
-                        Ok(_) => ui_for_value.apply_toggle_success(false),
+                        Ok(_) => ui_for_value.apply_toggle_success(starting),
                         Err(err) => ui_for_value.apply_toggle_error(&err),
                     }
                     glib::ControlFlow::Break
