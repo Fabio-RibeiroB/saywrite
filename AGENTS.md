@@ -104,6 +104,7 @@ When writing copy, diagnostics, or onboarding text, use these mode names. Do not
   ```
   flatpak-builder --user --install --force-clean build-dir flatpak/io.github.fabio.SayWrite.json
   ```
+- **Always verify the developer is running the latest Flatpak build.** There have been instances where launching SayWrite from GNOME loaded a stale version that did not reflect recent changes. If the user reports behavior that contradicts the code, ask them to rebuild and relaunch before investigating further.
 
 ## Docs
 
