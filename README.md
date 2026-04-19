@@ -4,6 +4,8 @@ SayWrite is a Linux dictation app. Press a hotkey, speak, and your words land in
 
 Install through Flatpak. Use it right away with clipboard delivery. Optionally enable direct typing for deeper system integration.
 
+> **Early work in progress.** SayWrite is still under active development. It works well on the setups it has been tested on, but it may not work for you yet. Direct typing support is desktop-dependent, and not every Linux environment is validated. If you try it and something breaks, that feedback is welcome.
+
 ## How It Works for Users
 
 SayWrite has two user-facing modes:
