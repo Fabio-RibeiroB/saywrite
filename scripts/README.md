@@ -38,20 +38,20 @@ Optional explicit modes:
 
 ## Host Setup Scripts
 
-`install-host.sh` installs the Rust `saywrite-host` companion into the user environment and registers the user service and D-Bus activation entry.
+`install-host.sh` installs the Rust `saywrite-host` companion into the user environment and registers the user service and D-Bus activation entry. It also installs `whisper-cli` to `~/.local/bin/` for the host daemon to use.
 
 ```bash
 cargo build --release
 ./scripts/install-host.sh
 ```
 
-`install-gnome-shortcut.sh` installs a GNOME custom shortcut fallback that calls the host D-Bus toggle command.
+`install-gnome-shortcut.sh` installs a GNOME custom shortcut fallback that calls the host D-Bus toggle command. Use this if the XDG GlobalShortcuts portal does not work on your desktop.
 
 ```bash
 ./scripts/install-gnome-shortcut.sh
 ```
 
-`run-global-dictation.sh` is the debounced helper command used by the GNOME shortcut fallback.
+`run-global-dictation.sh` is the debounced helper command used by the GNOME shortcut fallback. It calls `ToggleDictation` on the host D-Bus interface with a guard against rapid repeated invocations.
 
 ```bash
 ./scripts/run-global-dictation.sh

@@ -58,6 +58,7 @@ Track each row as `Pass`, `Degraded`, `Fail`, or `Untested`.
 | GNOME Wayland | IBus engine | Pass on current machine | Direct insertion proven locally |
 | GNOME Wayland | IBus engine on second machine/account | Untested | Needed before broader beta claim |
 | X11 | xdotool | Untested | Important secondary target |
+| KDE Plasma Wayland | XDG GlobalShortcuts portal + wtype/ydotool | Untested | Portal likely works; insertion needs validation |
 | wlroots Wayland | wtype | Untested | Good non-GNOME Wayland target |
 | Wayland unsupported compositor | clipboard / notification | Untested | Should degrade clearly |
 
@@ -77,7 +78,7 @@ Each supported environment should be tested against representative app types.
 
 Run this for every matrix row:
 
-1. Start `saywrite-host`.
+1. Start SayWrite (the app starts `saywrite-host` automatically).
 2. Confirm diagnostics show the expected insertion mode.
 3. Focus a text field in the target app.
 4. Press the hotkey once to start.
@@ -129,7 +130,7 @@ Healthy run:
 
 - `ToggleDictation start ok: Listening...`
 - `ToggleDictation stop ok: raw_len=... cleaned_len=...`
-- `ToggleDictation insertion result: ok=true ...`
+- `ToggleDictation insertion result: ok=true kind=typed ...`
 
 Bad signs:
 
@@ -137,6 +138,7 @@ Bad signs:
 - stuck microphone indicator
 - insertion result `ok=false`
 - daemon not returning to `idle`
+- `saywrite-host refusing to start: no process owns io.github.fabio.SayWrite`
 
 ## Beta Release Gate
 
@@ -152,6 +154,7 @@ Before public beta, these must be true:
 ## Nice To Have Before Beta
 
 - one wlroots Wayland pass with `wtype`
+- one KDE Plasma Wayland pass with GlobalShortcuts portal
 - screenshots of the diagnostics states for supported and degraded modes
 - short release notes listing supported and degraded environments
 
@@ -163,7 +166,7 @@ These should not block the first release:
 - every app category
 - perfect hands-free or press-and-hold semantics
 - tray UX
-- broad marketing claims like “works in any text field on Linux”
+- broad marketing claims like "works in any text field on Linux"
 
 ## Current Best Claim
 

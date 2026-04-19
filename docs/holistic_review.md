@@ -7,10 +7,15 @@ This review summarizes the current structural issues in the SayWrite codebase an
 The codebase is in reasonable shape for:
 
 - microphone capture
-- transcription
+- transcription (local whisper.cpp and cloud OpenAI-compatible API)
 - cleanup
 - clipboard delivery
-- direct insertion on supported host setups
+- direct insertion on supported host setups (GNOME Wayland via IBus bridge)
+- in-app host installation with progress feedback
+- global shortcut capture with GNOME keybinding suspend/restore
+- host daemon lifecycle tied to GUI (starts on launch, stops and is masked on close)
+- explicit insertion capability and result-kind reporting
+- host-side toggle debounce and error sanitization
 
 It is not yet in a universal state for:
 
@@ -20,23 +25,35 @@ The main gap is not transcription quality. The remaining gap is that insertion i
 
 ## What Is Working
 
-- `dictation.rs` handles recording and transcription end to end.
+- `dictation.rs` handles recording and transcription end to end, with silence detection to filter out empty recordings.
 - `cleanup.rs` has focused tests and produces deterministic cleaned text.
 - The app/host split is directionally correct: GTK app in Flatpak, host daemon outside sandbox.
 - The D-Bus host path is the primary control plane and is easier to reason about than a socket-only design.
 - Clipboard fallback is broadly practical.
-- The host now includes an IBus bridge for GNOME Wayland.
-- The current tree compiles again, including the host-side IBus path.
-- Direct insertion is now working on supported setups, including the currently reported environment.
+- The host includes an IBus bridge for GNOME Wayland with engine swap/restore logic and retry on failure.
+- `saywrite-host` refuses to start unless the app owns its D-Bus name (`io.github.fabio.SayWrite`), preventing orphan daemons.
+- Direct insertion is working on supported setups, including the currently reported GNOME Wayland environment.
+- `wtype` (Wayland) and `xdotool` (X11) insertion paths exist and are probed, but remain untested on real hardware.
+- Insertion capability and result kinds are explicit: `typing`/`clipboard-only`/`notification-only`/`unavailable` and `typed`/`copied`/`notified`/`failed`.
+- `host_setup.rs` provides desktop detection (GNOME Wayland, Other Wayland, X11, Other) with per-profile dependency checks and package hints.
+- In-app host installation via `install_host_companion()` builds the release binary and runs the install script.
+- Shortcut capture dialog suspends GNOME keybindings during capture and restores them afterward.
+- Shortcut changes from within Flatpak update GNOME keybindings directly via `flatpak-spawn --host gsettings`.
+- Host-side toggle debounce (900ms) prevents repeated shortcut activations from wedging the daemon.
+- Error sanitization maps typed `DictationError` variants to user-friendly messages.
+- `cargo check` passes on the current tree.
 
 ## Current State
 
 The repo has moved substantially since earlier reviews:
 
-- `saywrite-host` includes a dedicated `ibus.rs` bridge and prefers it on GNOME Wayland.
-- The insertion layer prefers `IbusEngine` before `wtype` on GNOME Wayland.
-- The code still falls back to clipboard and notification delivery when true typing is unavailable.
-- `cargo check` passes on the current tree.
+- `saywrite-host` includes a dedicated `input.rs` module with IBus bridge and GlobalShortcuts portal support.
+- The insertion layer (`insertion.rs`) prefers `IbusEngine` before `wtype` on GNOME Wayland, then `xdotool` on X11, then clipboard tools, then notification.
+- The host daemon checks `app_session_is_active()` before starting, so it won't run without the GUI.
+- The app masks the host service on shutdown, preventing orphan activation after quit.
+- `host_setup.rs` handles desktop-aware diagnostics with per-profile dependency requirements and Ubuntu/Zorin package hints.
+- Settings sync from Flatpak to host via `flatpak-spawn --host` on save.
+- The code falls back to clipboard and notification delivery when true typing is unavailable.
 
 That means older assessments that treated Wayland insertion as only `wtype`-based, or that said direct insertion was not working at all, are now stale.
 
@@ -50,7 +67,7 @@ The broader product conclusion still does not become "works everywhere", because
 
 ### 1. UI orchestration is still too stateful
 
-`src/ui/main_window.rs` has improved, but it still owns a large amount of application flow:
+`src/ui/main_window/` has improved, but it still owns a large amount of application flow:
 
 - dictation start/stop state
 - host signal consumption
@@ -62,7 +79,7 @@ This is manageable for now, but the UI layer still knows too much about host beh
 
 ### 2. Async integration is polling-heavy, though cleaner than before
 
-GTK-facing async work is still bridged through timer polling. A shared helper now exists in `src/ui/async_poll.rs`, which is an improvement, but the architecture still depends on:
+GTK-facing async work is still bridged through timer polling. A shared helper exists in `src/ui/async_poll.rs`, which is an improvement, but the architecture still depends on:
 
 - worker thread
 - channel
@@ -78,13 +95,13 @@ This is not broken, but it is still a code smell because state transitions remai
 - change insertion policy safely
 - distinguish backend errors from orchestration errors
 
-### 4. Error handling is still partly string-based
+### 4. Error handling is partly typed, but UI still interprets by substring
 
-Some host errors are typed now, but the UI still interprets failures by matching message substrings. That creates drift risk between backend behavior and frontend messaging.
+Host errors are now sanitized through `sanitize_error()` which maps `DictationError` variants to user-friendly messages. However, the UI layer still interprets some failures by matching message substrings. That creates drift risk between backend behavior and frontend messaging.
 
-### 5. Runtime capability reporting is better, but still not the full product truth
+### 5. Runtime capability reporting is explicit, but product messaging can still overgeneralize
 
-The repo now has explicit insertion capability and result categories, which is a real improvement. The remaining issue is that product-level messaging can still overgeneralize from the active setup.
+The repo has explicit insertion capability and result categories (`host_api.rs`), runtime probing (`runtime.rs`), and desktop-aware diagnostics (`host_setup.rs`). The remaining issue is that product-level messaging can still overgeneralize from the active setup.
 
 The actual backend may be:
 
@@ -103,18 +120,28 @@ Hotkey and insertion support still depend on parsing host command behavior and c
 - `gdbus`
 - `wtype`
 - `xdotool`
+- `wpctl`
+- `pactl`
 - clipboard tools
 
 This is practical, but not robust enough to support strong claims like "works in any text field".
 
 ### 7. Test coverage is improving, but still narrow overall
 
-There is now some real host-side unit coverage, including backend classification and IBus parsing. The remaining thin areas are:
+There is now real host-side unit coverage, including:
+
+- backend classification and result-kind mapping (`insertion.rs`)
+- IBus parsing (`input.rs`)
+- error sanitization (`service.rs`)
+- toggle debounce (`service.rs`)
+
+The remaining thin areas are:
 
 - host D-Bus behavior
 - settings migration and runtime probing
 - end-to-end host-side dictation state transitions
 - IBus engine restore and commit lifecycle under failure
+- `host_setup.rs` desktop detection logic
 
 ## Why The Product Still Cannot Promise Universal Text-Field Dictation
 
@@ -135,7 +162,7 @@ The following are not text-field insertion:
 - `xsel`
 - `notify-send`
 
-Those paths can still return success-like messages, which means the system can report successful delivery even when it only copied text or showed a notification.
+Those paths can still return success-like messages, which means the system can report successful delivery even when it only copied text or showed a notification. The result-kind system (`typed` vs `copied` vs `notified` vs `failed`) distinguishes these, but the UI still needs to surface the distinction clearly to users.
 
 ### 2. Capability reporting is no longer blind, but support still depends on the active backend
 
@@ -187,59 +214,54 @@ This means the current product is best understood as:
 - reliable clipboard delivery
 - direct typing on supported host setups
 
-## What Should Change
+## What Has Been Addressed
 
-### 1. Make insertion capability honest
+### 1. Insertion capability is now honest ✅
 
-Introduce explicit capability states such as:
+Explicit capability states exist in `host_api.rs`:
 
-- `Typing`
-- `ClipboardOnly`
-- `NotificationOnly`
-- `Unavailable`
+- `typing`
+- `clipboard-only`
+- `notification-only`
+- `unavailable`
 
-The UI should stop presenting clipboard fallback as equivalent to successful direct insertion.
+Result kinds also distinguish outcomes:
 
-### 2. Separate "typed" from "delivered"
+- `typed`
+- `copied`
+- `notified`
+- `failed`
 
-Host responses and UI copy should distinguish:
+### 2. "Typed" is separated from "delivered" ✅
 
-- text typed into target field
-- text copied to clipboard
-- text shown in notification
+Host responses carry explicit `result_kind` fields. The D-Bus `InsertionResult` signal includes `(ok, result_kind, message)`.
 
-These are different outcomes and should not share the same success category.
+### 3. Backend reporting is explicit in diagnostics ✅
 
-### 3. Keep backend reporting explicit in diagnostics
+The runtime probe (`runtime.rs`) reports insertion capability and backend. The host setup diagnostics (`host_setup.rs`) show desktop profile, missing dependencies, and package hints.
 
-This is now implemented in the host/runtime path and should remain explicit in the UI and support docs, for example:
+### 4. Product language has been narrowed ✅
 
-- `ibus-engine`
-- `wtype`
-- `xdotool`
-- `clipboard only`
-- `notification only`
+The README and onboarding now use "Clipboard Mode" and "Direct Typing Mode" as user-facing terms, with honest claims about supported environments.
 
-### 4. Narrow the product promise
+## What Should Still Change
 
-The app should not claim "dictate into any text field" unless a real typing backend is active and the current desktop path supports that claim.
-
-### 5. Add targeted tests for insertion policy and host flow
+### 1. Add targeted tests for insertion policy and host flow
 
 The next tests should focus on:
 
 - host D-Bus state transitions
-- IBus engine restore behavior
-- fallback behavior
-- host insertion result reporting
+- IBus engine restore behavior under failure
+- `host_setup.rs` desktop detection logic
+- settings migration and runtime probing
 
-### 6. Add verification around the IBus bridge
+### 2. Tighten UI error interpretation
 
-The IBus bridge is now part of the working insertion story, so the next step is not "get it compiling" but "prove it stays working":
+Move the UI away from substring matching on error messages toward typed error handling that uses the sanitized messages from `service.rs`.
 
-- add focused tests where practical
-- add repeatable manual verification notes for supported desktops
-- report when the bridge is registered versus when SayWrite is only falling back
+### 3. Consolidate async state model
+
+Consider moving from timer-based polling to a single event-driven state machine for dictation lifecycle, so that the UI reacts to host signals rather than polling for state changes.
 
 ## Recommended Product Language
 
@@ -254,7 +276,7 @@ It is still not accurate to promise:
 
 ## Bottom Line
 
-SayWrite is already useful because transcription and clipboard flow work well, and direct insertion is now working on supported setups. The new IBus path is a meaningful improvement to the Wayland story. But the current host insertion layer still does not justify the stronger UX promise of universal direct text-field insertion across Linux.
+SayWrite is already useful because transcription and clipboard flow work well, and direct insertion is now working on supported setups. The IBus bridge, explicit capability reporting, in-app host installation, and daemon lifecycle management are all meaningful improvements. But the current host insertion layer still does not justify the stronger UX promise of universal direct text-field insertion across Linux.
 
 The main issue is not a single bug. It is a mismatch between:
 
@@ -267,3 +289,4 @@ The next meaningful improvement is still not another transcription change. It is
 - keeping insertion capability explicit and truthful
 - separating real typing success from clipboard or notification delivery
 - documenting and verifying the supported insertion environments
+- expanding cross-desktop validation (KDE Plasma, wlroots, X11)

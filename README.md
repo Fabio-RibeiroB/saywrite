@@ -142,14 +142,27 @@ This binds `Super+Alt+D` to trigger dictation via D-Bus.
 ## Repository Layout
 
 ```
-src/                    Rust app source
-  bin/saywrite-host     Host companion daemon
-  ui/                   GTK/libadwaita UI components
-data/                   Desktop metadata and icons
-flatpak/                Flatpak manifest
-scripts/                Developer and installation scripts (see scripts/README.md)
-docs/                   Product and architecture documentation (see docs/README.md)
-vendor/                 Vendored dependencies (whisper.cpp)
+src/                        Rust app source
+  bin/saywrite-host/        Host companion daemon (dbus, input, insertion, service)
+  ui/                       GTK/libadwaita UI components
+    main_window/            Main dictation window
+    onboarding.rs           Onboarding carousel
+    preferences.rs          Settings and diagnostics
+    shortcut_capture.rs     Keyboard shortcut capture dialog
+    async_poll.rs           GTK-safe background task polling
+  config.rs                 AppSettings, ProviderMode, ModelSize, JSON load/save
+  cleanup.rs                Transcript cleanup rules
+  dictation.rs              Mic capture, whisper transcription, cloud handoff
+  host_api.rs               D-Bus constants and host status types
+  host_integration.rs       D-Bus client for host communication
+  host_setup.rs             Host install flow and desktop detection
+  model_installer.rs        Model download and cache management
+  runtime.rs                Capability probing (GPU, whisper, insertion)
+data/                       Desktop metadata and icons
+flatpak/                    Flatpak manifest
+scripts/                    Developer and installation scripts (see scripts/README.md)
+docs/                       Product and architecture documentation (see docs/README.md)
+vendor/                     Vendored dependencies (whisper.cpp)
 ```
 
 ## Documentation
@@ -167,11 +180,17 @@ Key docs:
 The current app and host workflow are Rust-native. The supported development path is the GTK app plus the `saywrite-host` daemon described above.
 
 Current state:
-- GTK app exists as the setup and diagnostics surface
-- `saywrite-host` owns the real dictation workflow
-- global hotkey dictation works through the host path while SayWrite is running
-- local and cloud transcription both work end-to-end
-- direct insertion works on the validated GNOME Wayland setup
-- clipboard and notification fallbacks work on other environments
+- GTK app with onboarding, main dictation window, settings, and diagnostics
+- `saywrite-host` owns the real dictation workflow (D-Bus service, IBus bridge, GlobalShortcuts portal)
+- Host daemon lifecycle tied to GUI (starts on app launch, stops and is masked on close)
+- Global hotkey dictation works through the host path while SayWrite is running
+- Local (whisper.cpp) and cloud (OpenAI-compatible API) transcription both work end-to-end
+- Direct insertion works on the validated GNOME Wayland setup via IBus bridge
+- `wtype` (Wayland) and `xdotool` (X11) insertion paths exist but are untested on real hardware
+- Clipboard and notification fallbacks work on other environments
+- Desktop detection auto-selects the best insertion backend per session
+- In-app host installation with progress feedback
+- Shortcut capture dialog with GNOME keybinding suspend/restore
+- Host-side unit tests cover backend classification, result-kind mapping, IBus parsing, error sanitization, and toggle debounce
 
-The next major milestone is support-matrix validation and release polish so Direct Typing Mode can be documented with narrower, evidence-backed claims.
+The next major milestone is cross-desktop validation and release polish so Direct Typing Mode can be documented with narrower, evidence-backed claims.

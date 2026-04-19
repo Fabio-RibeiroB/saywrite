@@ -16,21 +16,23 @@ SayWrite is a Linux-first dictation app with a Rust GTK4/libadwaita shell and a 
 | File | Role |
 |------|------|
 | `src/main.rs` | GTK application entry point |
-| `src/app.rs` | GTK application + activation flow |
+| `src/app.rs` | GTK application + activation flow, host daemon lifecycle |
 | `src/lib.rs` | shared library surface for app and host |
 | `src/config.rs` | `AppSettings`, `ProviderMode`, `ModelSize`, JSON load/save, XDG paths |
 | `src/cleanup.rs` | `cleanup_transcript()` |
 | `src/dictation.rs` | microphone session control, whisper.cpp CLI transcription, cloud handoff, session state |
 | `src/model_installer.rs` | model download, validation, and cache flow |
-| `src/host_integration.rs` | D-Bus/Unix socket text insertion client, clipboard fallback |
-| `src/host_api.rs` | shared D-Bus constants and host status types |
-| `src/runtime.rs` | readiness probing |
-| `src/ui/main_window.rs` | main dictation window |
+| `src/host_integration.rs` | D-Bus client for host communication, signal subscription |
+| `src/host_api.rs` | shared D-Bus constants, host status types, capability/result enums |
+| `src/host_setup.rs` | host install flow, desktop detection, diagnostics |
+| `src/runtime.rs` | readiness probing (GPU, whisper, insertion) |
+| `src/ui/main_window/` | main dictation window |
 | `src/ui/async_poll.rs` | GTK-safe background task polling helper |
 | `src/ui/onboarding.rs` | onboarding carousel |
 | `src/ui/preferences.rs` | preferences and diagnostics |
-| `src/bin/saywrite-host/` | host daemon, hotkey, insertion, and D-Bus service code |
-| `scripts/install-host.sh` | installs `saywrite-host` as a user service + D-Bus service |
+| `src/ui/shortcut_capture.rs` | keyboard shortcut capture dialog |
+| `src/bin/saywrite-host/` | host daemon: `main.rs`, `dbus.rs`, `input.rs` (IBus bridge, GlobalShortcuts portal), `insertion.rs`, `service.rs` |
+| `scripts/install-host.sh` | installs `saywrite-host` and `whisper-cli` as user services + D-Bus service |
 | `scripts/install-gnome-shortcut.sh` | GNOME custom shortcut fallback installer |
 
 ## User-Facing Modes
@@ -50,26 +52,31 @@ When writing copy, diagnostics, or onboarding text, use these mode names. Do not
 - `AppSettings.global_shortcut_label` defaults to `Super+Alt+D`.
 - `cleanup_transcript()` is deterministic and should stay conservative.
 - `saywrite-host` exists and answers D-Bus calls on `io.github.saywrite.Host`.
-- The app prefers D-Bus for host insertion and falls back to the Unix socket/clipboard path.
-- The host now attempts XDG GlobalShortcuts portal registration at startup and reports status over D-Bus.
-- Host insertion now exposes explicit capability/result categories: direct typing, clipboard fallback, notification fallback, or unavailable.
+- The app communicates with the host via D-Bus; there is no Unix socket path.
+- The host attempts XDG GlobalShortcuts portal registration at startup and reports status over D-Bus.
+- Host insertion exposes explicit capability/result categories: `typing`/`clipboard-only`/`notification-only`/`unavailable` and `typed`/`copied`/`notified`/`failed`.
 - On GNOME Wayland, host insertion prefers the SayWrite IBus engine bridge; on other setups it falls back to `wtype`, `xdotool`, clipboard tools, or notifications.
-- The GUI starts `saywrite-host` on launch and stops it on app shutdown.
-- Closing the app should disarm host-side activation so global shortcuts cannot wake the daemon back up after quit.
+- The GUI starts `saywrite-host` on launch and stops + masks it on app shutdown.
+- `saywrite-host` refuses to start unless the app owns `io.github.fabio.SayWrite` on the session bus, preventing orphan daemons.
+- Settings sync from Flatpak to host via `flatpak-spawn --host` on save.
+- Shortcut capture suspends GNOME keybindings during capture and restores them afterward.
+- Host-side toggle debounce (900ms) prevents repeated shortcut activations from wedging the daemon.
 - Settings can replay onboarding without wiping the rest of the app state.
 
 ## Current State
 
-- GTK UI is polished enough for onboarding and diagnostics.
-- Microphone capture and cleanup work.
+- GTK UI with onboarding carousel, main dictation window, settings, diagnostics, and shortcut capture.
+- Microphone capture uses GStreamer with WirePlumber default source detection and silence filtering.
+- Cleanup produces deterministic cleaned text.
 - Local transcription works if `whisper-cli` and a model are installed.
 - Cloud mode is wired through the configured OpenAI-compatible API base and key.
 - `saywrite-host` starts, owns the D-Bus name, and handles `GetStatus`, `InsertText`, and `ToggleDictation`.
-- The host emits D-Bus signals for dictation state, ready text, and insertion results.
-- Global shortcut support is in progress: portal registration is implemented, but desktop support and fallback behavior still matter.
-- The SayWrite IBus bridge is implemented and is now the primary GNOME Wayland insertion path.
-- There is now a repo-local host install script for running the companion outside Flatpak.
-- Host-side unit tests now cover IBus parsing and insertion backend classification.
+- The host emits D-Bus signals for dictation state, ready text, and insertion results (with `result_kind`).
+- XDG GlobalShortcuts portal registration is implemented and works on KDE and wlroots compositors.
+- The SayWrite IBus bridge is the primary GNOME Wayland insertion path with engine swap/restore and retry logic.
+- In-app host installation builds the release binary if needed and runs the install script.
+- Desktop detection (GNOME Wayland, Other Wayland, X11, Other) with per-profile dependency checks and package hints.
+- Host-side unit tests cover IBus parsing, insertion backend classification, result-kind mapping, error sanitization, and toggle debounce.
 
 ## Design Principles
 

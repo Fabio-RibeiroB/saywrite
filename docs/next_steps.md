@@ -2,229 +2,141 @@
 
 SayWrite has crossed the main technical hurdle: hotkey-driven dictation, cleanup, and direct insertion now work on a real GNOME Wayland machine through the host daemon and IBus bridge.
 
-The next phase is not new architecture. It is release readiness and polish.
+The next phase is cross-desktop compatibility. SayWrite should work out of the box for anyone who can install a Flatpak, regardless of desktop environment.
 
 ## Current State
 
-- The GTK app exists and acts as the setup and diagnostics surface.
-- `saywrite-host` owns the real dictation workflow.
+- The GTK app exists with onboarding, main dictation window, settings, diagnostics, and shortcut capture.
+- `saywrite-host` owns the real dictation workflow (D-Bus service, IBus bridge, GlobalShortcuts portal).
 - Global hotkey dictation works through the host path while SayWrite is running.
-- Local transcription works end to end.
-- Cloud transcription exists.
-- Direct insertion works on the currently validated GNOME Wayland setup.
+- Local (whisper.cpp) transcription works end to end.
+- Cloud transcription works with OpenAI-compatible APIs.
+- Direct insertion works on the currently validated GNOME Wayland setup via IBus bridge.
+- `wtype` (Wayland) and `xdotool` (X11) insertion paths exist but are untested on real hardware.
 - Clipboard and notification fallbacks exist for degraded environments.
-- Host daemon lifecycle is now tied to the GUI (starts on app launch, stops on close).
-- Closing the app should disarm host activation so the companion does not wake back up after quit.
-- Mic capture hardened: PipeWire source detection, RMS silence rejection.
-- IBus path hardened: race condition fixed, retry logic, comprehensive logging.
-- Setup/install concerns are now split out of transport code (`host_setup.rs` vs `host_integration.rs`).
-- Host D-Bus transport is now thinner: daemon workflow/state lives in `service.rs` instead of `dbus.rs`.
+- Host daemon lifecycle is tied to the GUI (starts on app launch, stops and is masked on close).
+- `saywrite-host` refuses to start unless the app owns its D-Bus name, preventing orphan daemons.
+- Shortcut capture dialog temporarily suspends the active GNOME keybinding so all key combos can be captured.
+- Shortcut changes from within Flatpak update GNOME keybindings directly via `flatpak-spawn --host gsettings`.
+- In-app host installation with progress feedback (builds release binary if needed).
+- Desktop detection auto-selects the best insertion backend per session (GNOME Wayland, Other Wayland, X11, Other).
+- Insertion capability and result kinds are explicit: `typing`/`clipboard-only`/`notification-only`/`unavailable` and `typed`/`copied`/`notified`/`failed`.
+- Host-side toggle debounce (900ms) prevents repeated shortcut activations from wedging the daemon.
+- Error sanitization maps typed `DictationError` variants to user-friendly messages.
+- Host-side unit tests cover backend classification, result-kind mapping, IBus parsing, error sanitization, and toggle debounce.
+
+## Cross-Desktop Compatibility — Priority #1
+
+The goal: any Linux user who installs the Flatpak should get working dictation with minimal friction. GNOME, KDE Plasma, XFCE, Sway, Hyprland — all should work.
+
+### Global Shortcut (the biggest gap)
+
+Currently the global hotkey relies on two mechanisms:
+1. XDG GlobalShortcuts portal (registered by `saywrite-host` at startup — works on KDE and some wlroots compositors)
+2. GNOME custom keybindings via `gsettings` (fallback set by `install-gnome-shortcut.sh`)
+
+**What needs to happen:**
+
+- **KDE Plasma**: The XDG GlobalShortcuts portal works well on KDE. Test and validate that `saywrite-host`'s portal registration works out of the box. If it does, KDE users get zero-setup hotkeys.
+- **wlroots (Sway, Hyprland)**: These compositors generally support the XDG GlobalShortcuts portal. Validate and document.
+- **XFCE / X11 desktops**: No portal support. Provide a fallback: detect the desktop and offer instructions or a script to set up a custom shortcut that calls `busctl --user call io.github.saywrite.Host /io/github/saywrite/Host io.github.saywrite.Host ToggleDictation`.
+- **Generic fallback UI**: When no portal is available and no GNOME keybinding is detected, show clear in-app instructions for the user to set up a system shortcut manually. Include a "Test Shortcut" button so they can verify it works.
+- **Portal-first strategy**: Make the XDG GlobalShortcuts portal the primary path on all desktops. Only fall back to GNOME gsettings when the portal is unavailable.
+
+### Text Insertion
+
+Currently insertion is GNOME-specific (IBus bridge). Other desktops need their own paths:
+
+- **KDE Plasma Wayland**: Investigate `ydotool`, `wtype`, or KDE's input method framework
+- **wlroots Wayland**: `wtype` is already probed by `insertion.rs` — validate on real hardware
+- **X11 (any desktop)**: `xdotool type` is already probed — validate on real hardware
+- **Clipboard fallback**: Already works everywhere — this is the safe default and should remain seamless
+
+### Detection and Honest Reporting
+
+- Auto-detect the desktop environment and session type at startup ✅ (implemented in `host_setup.rs`)
+- Report the actual insertion method in the UI (Direct Typing / Clipboard / Notification) ✅ (implemented via capability labels)
+- Don't show GNOME-specific setup steps on KDE or other desktops — needs audit
+- Tailor onboarding copy to the detected environment — needs work
+
+### Concrete Tasks
+
+1. **Test XDG GlobalShortcuts portal on KDE Plasma** — if it works, KDE gets first-class support with no code changes
+2. **Test `wtype` insertion on Sway/Hyprland** — already probed, just needs validation
+3. **Test `xdotool` insertion on X11** — already probed, just needs validation
+4. **Add desktop-aware shortcut setup** — detect DE and use the right mechanism (portal → gsettings → manual instructions)
+5. **Add a "Test Shortcut" flow** — after setting up a shortcut (manually or via portal), let the user verify it triggers dictation before leaving setup
+6. **Remove GNOME assumptions from UI copy** — audit all user-facing strings for GNOME-specific language
+7. **Update `apply_shortcut_change`** — use portal or DE-specific mechanism instead of always trying GNOME gsettings
 
 ## Product Framing
 
-The product should be presented as two user-facing modes, even if the implementation still uses multiple processes under the hood:
+The product is presented as two user-facing modes:
 
 - `Clipboard Mode`:
-  - works with the Flatpak app alone
+  - works with the Flatpak app alone on any desktop
   - records, transcribes, cleans, and copies text
   - is the safe default when direct typing is not enabled
 - `Direct Typing Mode`:
   - enables host integration outside the sandbox
   - allows hotkey-driven dictation and text insertion into supported host apps
-  - should feel like a single guided setup step, not "install a separate program manually"
+  - availability depends on the desktop environment and session type
 
-The key UX goal is that users experience one product, not "app plus helper". If the host-side integration remains visible and manual, the product will feel meaningfully worse than apps that simply stay open and minimized.
+The key UX goal is that users experience one product, not "app plus helper".
+
+## Completed Milestones
+
+### Package the Host Companion Cleanly ✅
+- In-app installation via `host_setup::install_host_companion()` works end-to-end
+- Settings shows Clipboard Mode vs Direct Typing clearly
+- Host daemon lifecycle tied to GUI (starts on launch, stops and is masked on close)
+- Host refuses to start without app D-Bus name ownership
+
+### Harden the IBus Path ✅
+- Fixed race condition, added retry logic, comprehensive logging
+- Engine swap/restore with 120ms delay and retry on failure
+- Repeated dictation reliable without daemon restart
+
+### Capability Reporting ✅
+- Runtime probing complete: GPU detection, whisper.cpp discovery, local model check
+- Diagnostics page shows insertion backend and hotkey status
+- Onboarding shows real mode from host_status
+- Explicit capability states: `typing`, `clipboard-only`, `notification-only`, `unavailable`
+- Explicit result kinds: `typed`, `copied`, `notified`, `failed`
+
+### Host Regression Tests ✅
+- Backend classification, result-kind mapping, IBus parsing
+- Service error sanitization + debounce tests
+
+### UI Polish ✅
+- WaveformBox, Revealers, inline setup actions, insertion chip
+- Shortcut capture with GNOME keybinding suspend/restore
+- Onboarding shortcut page with explicit Change button
+- Settings sync from Flatpak to host via `flatpak-spawn --host`
+
+### Desktop Detection ✅
+- `host_setup.rs` detects GNOME Wayland, Other Wayland, X11, Other
+- Per-profile dependency checks with Ubuntu/Zorin package hints
+- Diagnostics show desktop label, host files status, and dependency status
 
 ## Release Priorities
 
-## 1. Package the Host Companion Cleanly ✅
+### v1.1 — Cross-Desktop Support
+1. Validate XDG GlobalShortcuts portal on KDE Plasma and wlroots
+2. Validate `wtype` and `xdotool` insertion on non-GNOME desktops
+3. Desktop-aware shortcut setup (portal-first, DE fallbacks)
+4. Audit and fix all GNOME-specific UI copy
+5. "Test Shortcut" verification flow
+6. GNOME Wayland direct insertion validation on a second machine/account
 
-The Flatpak app is only half of the full direct-typing story. The host companion now needs a clean install story for normal users, ideally behind a single "Enable Direct Typing" flow inside the app.
-
-**Status: DONE**
-- In-app installation via `host_setup::install_host_companion()` works end-to-end
-- Settings opens with an Output mode section that shows Clipboard Mode vs Direct Typing clearly and exposes the in-app "Enable" action when installation is available
-- Fallback instructions shown for packaged/Flatpak-only users
-- Host daemon lifecycle now tied to GUI: starts on app launch, stops on app close
-- `scripts/install-host.sh` is fallback, not primary story
-
-## 2. Harden the IBus Path ✅
-
-The IBus bridge is now the critical GNOME Wayland path and needs reliability work, not reinvention.
-
-**Status: DONE**
-- Fixed race condition in `clear_pending_commit` by making it async
-- Added retry logic with 250ms delay on engine restore failure
-- Comprehensive logging at engine swap, commit, timeout, and failure points
-- Empty text guard prevents full round-trip for no-op calls
-- Repeated dictation tested and reliable without daemon restart
-
-## 3. Validate the Desktop Support Matrix
-
-**Status: SCOPED TO GNOME WAYLAND FOR v1.0**
-
-For the initial release, the supported platform is explicitly **GNOME on Wayland**. This is the one configuration that has been validated end-to-end. The appdata.xml states this clearly. Clipboard and notification fallbacks are automatic on other desktops, and the UI reports which mode is active so users are never surprised.
-
-X11 and wlroots support are deliberately deferred to post-v1.0. See the Platform Support Roadmap section below.
-
-Success bar for v1.0:
-
-- GNOME Wayland: direct typing works reliably
-- All other desktops: clipboard fallback activates automatically and is reported honestly in the UI
-
-## 4. Keep Capability Reporting Honest ✅
-
-The product must clearly distinguish between:
-
-- direct typing
-- clipboard fallback
-- notification fallback
-- unavailable
-
-**Status: DONE**
-- Runtime probing complete: GPU detection, whisper.cpp discovery, local model check
-- Diagnostics page shows insertion backend and hotkey status
-- Result messages distinguish typed/copied/notification outcomes
-- Onboarding `shortcut_page` probes `host_integration::host_status()` at carousel build time and displays the actual mode ("Direct Typing" or "Clipboard Mode") with matching copy and a `label.mode-chip` badge
-- Onboarding skips direct typing claims when host is unavailable; shows clipboard-mode copy with a hint to enable Direct Typing from Settings
-
-Success bar:
-
-- users can tell exactly what SayWrite will do on their machine before they start dictating
-
-## 5. Add Host-Focused Regression Tests ✅
-
-The risky part of the product is now host behavior, not transcript cleanup.
-
-**Status: DONE**
-- Host regression tests added (commit `41db094`)
-- Current coverage includes backend classification, result-kind mapping, IBus parsing
-- `service.rs` tests added: all `DictationError` variants → correct sanitized messages and `INSERTION_RESULT_FAILED` kind; generic errors fall back to safe message
-- Debounce tests: rapid repeated toggle is rejected with a helpful message; toggle after 950ms cooldown is accepted
-- IBus engine restore behavior tests deferred — require a real IBus daemon; parsing and detection logic is covered by existing `input::tests`
-
-Success bar:
-
-- refactors in the host daemon do not silently break insertion behavior
-
-## 6. Keep Structural Boundaries Clean
-
-Recent cleanup improved the code shape, but a few large boundaries still own too much behavior.
-
-**Status: IN PROGRESS**
-- Completed:
-  - Moved host install/setup workflow out of `host_integration.rs` into `host_setup.rs`
-  - Moved host daemon workflow/state machine out of `src/bin/saywrite-host/dbus.rs` into `src/bin/saywrite-host/service.rs`
-  - Split `src/ui/main_window.rs` into a directory module: `state.rs` (MainWindowUi state machine), `widgets.rs` (widget construction + event wiring), `mod.rs` (present() entry point)
-  - Unix socket fallback removed (dead code); D-Bus is now the sole transport
-- **TODO**: Revisit `src/app.rs` service lifecycle management (`systemctl --user start/stop/mask/unmask`) and make the GUI-to-host boundary less blunt
-
-Success bar:
-
-- transport layers stay thin, feature work lands in service modules, and UI files stop being orchestration bottlenecks
-
-## 7. Polish the Hotkey-First UX
-
-The app should feel like a control panel for a hotkey-first product, not the center of the workflow.
-
-**Status: PARTIALLY DONE**
-- **Completed**:
-  - Waveform animation during listening state
-  - Mic device picker in Settings
-  - Audio pause toggle (mute PC audio during dictation)
-  - Inline settings page (stack-based, no popup window)
-  - GPU detection in Diagnostics
-- **TODO**: First-run mode choice between Clipboard Mode and Direct Typing Mode
-- **TODO**: Onboarding should inform choice based on actual host capability
-- **TODO**: End onboarding with dictation test
-- **TODO**: Improve diagnostics copy for direct typing vs fallback
-
-Success bar:
-
-- the core user journey is: install, press shortcut, speak, see text land where expected
-
-## 8. Integrate The `ui-improvements` Worktree Carefully
-
-There is a separate UI worktree with useful UX polish that should be merged into the current branch without replacing the current app logic. The goal is to preserve the existing working behavior and only bring over the UX/UI improvements that still fit the current architecture.
-
-**Status: DONE**
-- Merge target: preserve current app/runtime/host behavior and only integrate the presentation and UX improvements
-- Source: `worktree-ui-improvements` / `ui-improvements` worktree
-- Review standard: every imported UI change should be checked against the current branch so stale assumptions do not overwrite newer host/setup/runtime logic
-
-Planned integration scope:
-- `src/ui/main_window.rs`
-  - Replace the simple listening spinner with animated waveform bars
-  - Add `GtkRevealer` crossfade transitions for activity, setup panel, transcript, and action row
-  - Add inline setup resolution actions:
-    - local model download from the main window
-    - inline cloud API key entry
-    - settings fallback action
-  - Add a header insertion-mode chip showing Direct Typing / Clipboard / Notification / Offline
-  - Rework transcript display to an editable `TextView` with live word/character counts and a Retry action
-- `src/ui/onboarding.rs`
-  - Add mic test recording feedback with a pulsing progress indicator and status text
-  - Add cancellable model download flow with a visible Cancel button and rough ETA text
-- `src/ui/preferences.rs`
-  - Add a brief "Settings saved" toast after debounced saves
-- `resources/style.css`
-  - Add styles for waveform bars, insertion chip, editable transcript view, and toast
-- `src/model_installer.rs`
-  - Add cancellable model download helper used by onboarding
-
-Success bar:
-
-- the UI gains the polish from the worktree without regressing current host behavior, setup logic, or diagnostics accuracy
-
-## Recommended Order for Remaining Work
-
-1. ✅ Package the host companion cleanly (DONE)
-2. ✅ Harden the IBus path (DONE)
-3. ✅ **Validate the desktop support matrix** (DONE: scoped to GNOME Wayland for v1.0; other platforms deferred)
-4. ✅ **Improve onboarding honest reporting** (DONE: onboarding shows real mode from host_status)
-5. ✅ **Expand host regression tests** (DONE: service error sanitization + debounce tests)
-6. → **Keep structural boundaries clean** (tighten app/service lifecycle; main_window split done — `app.rs` is post-v1)
-7. ✅ **Integrate the `ui-improvements` worktree carefully** (DONE: WaveformBox, Revealers, inline setup actions, insertion chip, transcript dismissal action, SaveToast, cancel download)
-
-## Release Goal
-
-SayWrite v1.0 is ready for a first public release. All blockers are cleared:
-
-- ✅ hotkey dictation works while SayWrite is running, and closing the app disarms the host companion
-- ✅ direct insertion works reliably on GNOME Wayland via IBus
-- ✅ supported platform is explicitly documented (GNOME Wayland; others get clipboard fallback)
-- ✅ degraded modes are honest and understandable (UI reports Direct Typing / Clipboard / Notification / Offline)
-- ✅ host installation is clear from inside the app
-- ✅ build and lint checks stay clean (`cargo clippy --all-targets --all-features -- -D warnings`)
-- ✅ appdata.xml reflects actual platform scope and release date
-
-## Platform Support Roadmap (Post-v1.0)
-
-The current IBus insertion path is GNOME-specific. Expanding the supported matrix is valuable follow-up work, in order of likely reach:
-
-### X11 (high priority)
-- Insert via `xdotool type` — already probed by `insertion.rs`, just not tested on a real machine
-- Needs: one manual test session on an X11 machine
-- Risk: `xdotool` has known issues with some apps (Qt, Electron) — may need per-app fallback
-
-### wlroots compositors (medium priority, e.g. sway, Hyprland)
-- Insert via `wtype` — already probed, needs real-machine validation
-- Compositor coverage is wide and fragmented; a "works on sway" claim requires its own test pass
-
-### Other GNOME Wayland app types
-- Browser fields, Electron apps, terminals — these all work via IBus but should be explicitly tested
-- Should be part of the same test pass as X11 validation
-
-### Longer term
-- KDE Plasma (Wayland): `ydotool` or KDE-specific input injection
-- Tray icon + quick controls (non-blocking, post-beta)
-- Custom vocabulary and context hints for product names, technical terms, and user-specific words (for example `SayWrite`, `daemon`, and domain terms)
-- More aggressive transcript cleanup customization
-- Application-aware formatting profiles
-
-## Non-Blocking After v1.0
-
-- `app.rs` service lifecycle tightening (current `systemctl` approach works, just blunt)
+### v1.2 — Polish
 - Tray icon and quick controls
-- More aggressive cleanup customization
+- Custom vocabulary and context hints
 - Application-aware formatting profiles
+- Move UI away from substring error matching toward typed error handling
+- Consider consolidating async state model (timer polling → event-driven)
+
+## Non-Blocking
+
+- More aggressive cleanup customization
+- Tray icon and quick controls (moved to v1.2)
