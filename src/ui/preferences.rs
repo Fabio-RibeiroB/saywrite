@@ -641,6 +641,7 @@ where
         .build();
 
     for (label, value) in [
+        ("Version", env!("CARGO_PKG_VERSION").to_string()),
         ("Provider", probe.provider_label.clone()),
         ("Dictation", probe.dictation_label.clone()),
         ("Acceleration", probe.acceleration_label.clone()),
