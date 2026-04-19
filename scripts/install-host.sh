@@ -7,6 +7,77 @@ SYSTEMD_DIR="${HOME}/.config/systemd/user"
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SELF_DIR}/.." && pwd)"
 
+if [ -f "/.flatpak-info" ]; then
+    APP_ID="$(awk -F= '/^name=/{print $2; exit}' /.flatpak-info)"
+    if [ -z "${APP_ID}" ]; then
+        echo "Error: could not determine Flatpak app ID from /.flatpak-info" >&2
+        exit 1
+    fi
+
+    APP_LOCATION="$(flatpak-spawn --host flatpak info --show-location "${APP_ID}" 2>/dev/null || true)"
+    if [ -z "${APP_LOCATION}" ]; then
+        echo "Error: could not determine host Flatpak install location for ${APP_ID}" >&2
+        exit 1
+    fi
+
+    HOST_ASSETS="${APP_LOCATION}/files"
+    if [ ! -f "${HOST_ASSETS}/libexec/saywrite-host" ]; then
+        echo "Error: expected host asset not found: ${HOST_ASSETS}/libexec/saywrite-host" >&2
+        exit 1
+    fi
+
+    flatpak-spawn --host bash -lc "set -euo pipefail
+BINDIR=\"\$HOME/.local/bin\"
+DBUS_DIR=\"\$HOME/.local/share/dbus-1/services\"
+SYSTEMD_DIR=\"\$HOME/.config/systemd/user\"
+mkdir -p \"\$BINDIR\" \"\$DBUS_DIR\" \"\$SYSTEMD_DIR\"
+
+install -Dm755 \"${HOST_ASSETS}/libexec/saywrite-host\" \"\$BINDIR/saywrite-host\"
+
+if [ -f \"${HOST_ASSETS}/bin/whisper-cli\" ]; then
+  install -Dm755 \"${HOST_ASSETS}/bin/whisper-cli\" \"\$BINDIR/whisper-cli.bin\"
+  cat > \"\$BINDIR/whisper-cli\" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+export LD_LIBRARY_PATH=\"${HOST_ASSETS}/lib64\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}\"
+exec \"\$(dirname \"\$0\")/whisper-cli.bin\" \"\$@\"
+EOF
+  chmod 755 \"\$BINDIR/whisper-cli\"
+fi
+
+if [ -f \"${HOST_ASSETS}/share/saywrite/run-global-dictation.sh\" ]; then
+  install -Dm755 \"${HOST_ASSETS}/share/saywrite/run-global-dictation.sh\" \"\$BINDIR/saywrite-dictation.sh\"
+fi
+
+sed \"s|ExecStart=.*|ExecStart=\$BINDIR/saywrite-host|\" \
+  \"${HOST_ASSETS}/share/saywrite/saywrite-host.service\" > \"\$SYSTEMD_DIR/saywrite-host.service\"
+chmod 644 \"\$SYSTEMD_DIR/saywrite-host.service\"
+
+sed \"s|Exec=.*|Exec=\$BINDIR/saywrite-host|\" \
+  \"${HOST_ASSETS}/share/saywrite/io.github.saywrite.Host.service\" > \"\$DBUS_DIR/io.github.saywrite.Host.service\"
+chmod 644 \"\$DBUS_DIR/io.github.saywrite.Host.service\"
+
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl --user daemon-reload || true
+  systemctl --user disable saywrite-host.service 2>/dev/null || true
+  systemctl --user unmask saywrite-host.service 2>/dev/null || true
+  systemctl --user start saywrite-host.service || true
+fi
+"
+
+    echo
+    echo "SayWrite host companion is installed on the host."
+    echo "  Source: ${HOST_ASSETS}"
+    echo "  Daemon: ~/.local/bin/saywrite-host"
+    echo "  Service: ~/.config/systemd/user/saywrite-host.service"
+    echo "  D-Bus: ~/.local/share/dbus-1/services/io.github.saywrite.Host.service"
+    echo
+    echo "Useful commands:"
+    echo "  systemctl --user status saywrite-host"
+    echo "  journalctl --user -u saywrite-host -f"
+    exit 0
+fi
+
 BINARY="${SAYWRITE_HOST_SOURCE:-}"
 if [ -z "${BINARY}" ]; then
     if [ -f "/app/libexec/saywrite-host" ]; then

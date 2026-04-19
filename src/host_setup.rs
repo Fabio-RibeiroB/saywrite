@@ -31,9 +31,9 @@ pub fn host_setup_status() -> HostSetupStatus {
     let dbus_service_path = host_dbus_service_path();
 
     HostSetupStatus {
-        binary_installed: binary_path.exists(),
-        systemd_service_installed: systemd_service_path.exists(),
-        dbus_service_installed: dbus_service_path.exists(),
+        binary_installed: host_path_exists(&binary_path),
+        systemd_service_installed: host_path_exists(&systemd_service_path),
+        dbus_service_installed: host_path_exists(&dbus_service_path),
         host_running: host_integration::host_status().is_some(),
         install_command: host_install_command(),
         gnome_shortcut_command: gnome_shortcut_command(),
@@ -238,6 +238,21 @@ fn set_gnome_binding_raw(binding: &str) -> Result<(), String> {
 
 fn inside_flatpak() -> bool {
     Path::new("/.flatpak-info").exists()
+}
+
+fn host_path_exists(path: &Path) -> bool {
+    if !inside_flatpak() {
+        return path.exists();
+    }
+
+    let Some(path_str) = path.to_str() else {
+        return false;
+    };
+
+    Command::new("flatpak-spawn")
+        .args(["--host", "test", "-e", path_str])
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 pub fn host_install_instructions() -> String {
