@@ -3,16 +3,19 @@ mod input;
 mod insertion;
 mod service;
 
-use std::fs;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
-use saywrite::config;
 use tokio::signal::unix::{signal, SignalKind};
+
+const APP_BUS_NAME: &str = "io.github.fabio.SayWrite";
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    if !app_session_is_active() {
-        eprintln!("saywrite-host refusing to start because SayWrite is not running");
+    if !app_session_is_active().await {
+        eprintln!(
+            "saywrite-host refusing to start: no process owns {APP_BUS_NAME} on the session bus"
+        );
         return Ok(());
     }
 
@@ -47,18 +50,36 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn app_session_is_active() -> bool {
-    let marker_path = config::host_session_marker_path();
-    let pid_text = match fs::read_to_string(&marker_path) {
-        Ok(value) => value,
-        Err(_) => return false,
-    };
-    let pid = match pid_text.trim().parse::<u32>() {
-        Ok(value) => value,
-        Err(_) => return false,
+async fn app_session_is_active() -> bool {
+    let conn = match zbus::Connection::session().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("saywrite-host: cannot reach session bus: {e}");
+            return false;
+        }
     };
 
-    std::path::Path::new(&format!("/proc/{pid}")).exists()
+    for attempt in 0..5 {
+        match conn
+            .call_method(
+                Some("org.freedesktop.DBus"),
+                "/org/freedesktop/DBus",
+                Some("org.freedesktop.DBus"),
+                "NameHasOwner",
+                &APP_BUS_NAME,
+            )
+            .await
+            .and_then(|reply| reply.body::<bool>())
+        {
+            Ok(true) => return true,
+            Ok(false) => {}
+            Err(e) => eprintln!("saywrite-host: NameHasOwner failed: {e}"),
+        }
+        if attempt < 4 {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
+    false
 }
 
 async fn init_ibus() {

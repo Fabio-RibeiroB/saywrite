@@ -4,10 +4,7 @@ use std::{cell::RefCell, path::Path, process::Command, rc::Rc};
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
-use crate::{
-    config::{self, AppSettings},
-    ui,
-};
+use crate::{config::AppSettings, ui};
 
 pub const APP_ID: &str = "io.github.fabio.SayWrite";
 
@@ -59,48 +56,13 @@ fn load_css() {
 }
 
 fn start_host_daemon() {
-    arm_host_session();
     run_user_systemctl(&["unmask", "saywrite-host.service"]);
     run_user_systemctl(&["start", "saywrite-host.service"]);
 }
 
 fn stop_host_daemon() {
-    disarm_host_session();
     run_user_systemctl(&["stop", "saywrite-host.service"]);
     run_user_systemctl(&["mask", "saywrite-host.service"]);
-}
-
-fn arm_host_session() {
-    if inside_flatpak() {
-        let script = format!(
-            "STATE_HOME=\"${{XDG_STATE_HOME:-$HOME/.local/state}}\"; mkdir -p \"$STATE_HOME/{app_dir}\"; printf '%s\\n' '{pid}' > \"$STATE_HOME/{app_dir}/{marker}\"",
-            app_dir = config::APP_DIR_NAME,
-            marker = config::HOST_SESSION_MARKER_NAME,
-            pid = std::process::id(),
-        );
-        run_host_shell(&script);
-        return;
-    }
-
-    let marker = config::host_session_marker_path();
-    if let Some(parent) = marker.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(marker, format!("{}\n", std::process::id()));
-}
-
-fn disarm_host_session() {
-    if inside_flatpak() {
-        let script = format!(
-            "STATE_HOME=\"${{XDG_STATE_HOME:-$HOME/.local/state}}\"; rm -f \"$STATE_HOME/{app_dir}/{marker}\"",
-            app_dir = config::APP_DIR_NAME,
-            marker = config::HOST_SESSION_MARKER_NAME,
-        );
-        run_host_shell(&script);
-        return;
-    }
-
-    let _ = std::fs::remove_file(config::host_session_marker_path());
 }
 
 fn run_user_systemctl(args: &[&str]) {
@@ -111,17 +73,6 @@ fn run_user_systemctl(args: &[&str]) {
             .status()
     } else {
         Command::new("systemctl").arg("--user").args(args).status()
-    };
-    let _ = status;
-}
-
-fn run_host_shell(script: &str) {
-    let status = if inside_flatpak() {
-        Command::new("flatpak-spawn")
-            .args(["--host", "sh", "-lc", script])
-            .status()
-    } else {
-        Command::new("sh").args(["-lc", script]).status()
     };
     let _ = status;
 }

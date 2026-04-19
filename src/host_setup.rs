@@ -511,6 +511,40 @@ fn parse_os_release(text: String) -> std::collections::HashMap<String, String> {
         .collect()
 }
 
+/// Fetch the last few lines of the host daemon's journal, used to explain
+/// why the service appears installed but unreachable. Runs on the host.
+pub fn host_daemon_journal_tail(lines: u32) -> Option<String> {
+    let lines_str = lines.to_string();
+    let args = [
+        "journalctl",
+        "--user",
+        "-u",
+        "saywrite-host.service",
+        "--no-pager",
+        "-n",
+        &lines_str,
+    ];
+
+    let output = if inside_flatpak() {
+        let mut spawn_args = vec!["--host"];
+        spawn_args.extend_from_slice(&args);
+        Command::new("flatpak-spawn").args(&spawn_args).output()
+    } else {
+        Command::new(args[0]).args(&args[1..]).output()
+    }
+    .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
 pub fn host_install_instructions() -> String {
     let setup = host_setup_status();
     let diagnostics = host_diagnostics();

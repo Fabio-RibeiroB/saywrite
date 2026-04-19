@@ -137,12 +137,27 @@ where
                             glib::ControlFlow::Continue
                         }
                         Ok(crate::host_setup::HostInstallUpdate::Done) => {
-                            btn.set_label("Enabled");
-                            btn.set_sensitive(false);
-                            btn.remove_css_class("suggested-action");
-                            install_row.set_subtitle("Direct Typing is ready. Reopen Settings to confirm.");
-                            install_progress_row.set_title("Done");
-                            install_progress_row.set_subtitle("saywrite-host is running.");
+                            if host_integration::host_available() {
+                                btn.set_label("Enabled");
+                                btn.set_sensitive(false);
+                                btn.remove_css_class("suggested-action");
+                                install_row.set_subtitle("Direct Typing is ready. Reopen Settings to confirm.");
+                                install_progress_row.set_title("Done");
+                                install_progress_row.set_subtitle("saywrite-host is running.");
+                            } else {
+                                btn.set_label("Retry");
+                                btn.set_sensitive(true);
+                                btn.add_css_class("suggested-action");
+                                install_row.set_subtitle(
+                                    "Installed, but saywrite-host isn't reachable on the session bus.",
+                                );
+                                install_progress_row.set_title("Daemon unreachable");
+                                let detail = crate::host_setup::host_daemon_journal_tail(8)
+                                    .unwrap_or_else(|| {
+                                        "Run `systemctl --user status saywrite-host` on the host for details.".into()
+                                    });
+                                install_progress_row.set_subtitle(&detail);
+                            }
                             glib::ControlFlow::Break
                         }
                         Err(msg) => {
