@@ -86,6 +86,7 @@ When writing copy, diagnostics, or onboarding text, use these mode names. Do not
 4. Local-first, offline-capable after model download.
 5. Auto-detect acceleration.
 6. Flatpak-first; host integration is a companion, not a hack.
+7. Make changes with the user base in mind. Don't just get it working on the developer's PC. A change that works in the dev checkout but relies on paths, state, or binaries that a fresh Flatpak user doesn't have is not a fix — it's a regression waiting to be reported. Before marking work done, ask: "would this still work on a machine that has only ever installed the `.flatpak` bundle?" If the answer is no or "not sure", fix that gap before shipping.
 
 ## Repo Hygiene
 

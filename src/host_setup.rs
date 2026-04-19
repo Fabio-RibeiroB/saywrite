@@ -159,43 +159,12 @@ pub fn install_host_companion() -> std::sync::mpsc::Receiver<Result<HostInstallU
 
 pub fn apply_shortcut_change(shortcut: &str) -> Result<(), String> {
     if gnome_shortcuts_supported() {
-        // Inside Flatpak the bundled bash script cannot update the host dconf
-        // and would set an invalid command path (/app/…). Update the binding
-        // value directly via gsettings on the host instead.
-        if inside_flatpak() {
-            if let Err(e) = apply_gnome_binding_via_gsettings(shortcut) {
-                eprintln!("gsettings shortcut update failed (non-fatal): {e}");
-            }
-        } else if let Some(script) = gnome_shortcut_script_path() {
-            let mut command = Command::new("bash");
-            command.arg(&script).arg(shortcut);
-            if let Some(dir) = script.parent() {
-                command.current_dir(dir);
-            }
-
-            match command.output() {
-                Ok(out) if !out.status.success() => {
-                    let stderr = String::from_utf8_lossy(&out.stderr);
-                    let stdout = String::from_utf8_lossy(&out.stdout);
-                    let text = if !stderr.trim().is_empty() {
-                        stderr
-                    } else {
-                        stdout
-                    };
-                    let snippet = text.lines().take(6).collect::<Vec<_>>().join("\n");
-                    return Err(format!("Failed to apply desktop shortcut:\n{snippet}"));
-                }
-                Err(err) => return Err(format!("Failed to run shortcut helper: {err}")),
-                _ => {}
-            }
-        } else {
-            // No script available outside Flatpak — try gsettings directly.
-            if let Err(e) = apply_gnome_binding_via_gsettings(shortcut) {
-                eprintln!("gsettings shortcut update failed (non-fatal): {e}");
-            }
-        }
+        // Install name + command + binding as one operation via gsettings —
+        // works identically inside Flatpak (through flatpak-spawn --host)
+        // and in dev checkouts. This is the single source of truth for the
+        // keybinding, replacing the earlier bash-script invocation.
+        ensure_gnome_shortcut(shortcut)?;
     }
-
     restart_host_service();
     Ok(())
 }
@@ -239,22 +208,36 @@ pub fn restore_gnome_shortcut(shortcut_label: &str) {
     }
 }
 
-fn apply_gnome_binding_via_gsettings(shortcut: &str) -> Result<(), String> {
-    let binding = shortcut_to_gnome_binding(shortcut);
-    set_gnome_binding_raw(&binding)
+fn set_gnome_binding_raw(binding: &str) -> Result<(), String> {
+    set_gnome_keybinding_field("binding", binding)
 }
 
-fn set_gnome_binding_raw(binding: &str) -> Result<(), String> {
-    const SCHEMA_KEY: &str = concat!(
-        "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding",
-        ":/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/saywrite-hands-free/"
-    );
+const HANDS_FREE_SCHEMA_KEY: &str = concat!(
+    "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding",
+    ":/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/saywrite-hands-free/"
+);
+const HANDS_FREE_PATH: &str =
+    "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/saywrite-hands-free/";
+const LEGACY_PATHS: &[&str] = &[
+    "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/saywrite/",
+    "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/saywrite-quick/",
+];
 
-    let args: Vec<&str> = vec!["gsettings", "set", SCHEMA_KEY, "binding", binding];
+fn set_gnome_keybinding_field(field: &str, value: &str) -> Result<(), String> {
+    let args: Vec<&str> = vec!["gsettings", "set", HANDS_FREE_SCHEMA_KEY, field, value];
+    run_host_or_local(&args)
+}
 
+fn get_gnome_keybinding_field(field: &str) -> Result<String, String> {
+    let args: Vec<&str> = vec!["gsettings", "get", HANDS_FREE_SCHEMA_KEY, field];
+    let out = capture_host_or_local(&args)?;
+    Ok(String::from_utf8_lossy(&out).trim().trim_matches('\'').to_string())
+}
+
+fn run_host_or_local(args: &[&str]) -> Result<(), String> {
     let out = if inside_flatpak() {
         let mut flatpak_args = vec!["--host"];
-        flatpak_args.extend_from_slice(&args);
+        flatpak_args.extend_from_slice(args);
         Command::new("flatpak-spawn")
             .args(&flatpak_args)
             .output()
@@ -263,14 +246,150 @@ fn set_gnome_binding_raw(binding: &str) -> Result<(), String> {
         Command::new(args[0])
             .args(&args[1..])
             .output()
-            .map_err(|e| format!("gsettings: {e}"))?
+            .map_err(|e| format!("{}: {e}", args[0]))?
     };
-
     if out.status.success() {
         Ok(())
     } else {
-        let msg = String::from_utf8_lossy(&out.stderr).into_owned();
-        Err(msg)
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+fn capture_host_or_local(args: &[&str]) -> Result<Vec<u8>, String> {
+    let out = if inside_flatpak() {
+        let mut flatpak_args = vec!["--host"];
+        flatpak_args.extend_from_slice(args);
+        Command::new("flatpak-spawn")
+            .args(&flatpak_args)
+            .output()
+            .map_err(|e| format!("flatpak-spawn: {e}"))?
+    } else {
+        Command::new(args[0])
+            .args(&args[1..])
+            .output()
+            .map_err(|e| format!("{}: {e}", args[0]))?
+    };
+    if out.status.success() {
+        Ok(out.stdout)
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+/// Resolve the absolute host-side path to the dictation launcher script.
+/// In Flatpak we rely on the one install-host.sh deploys to ~/.local/bin.
+/// In dev checkouts we fall back to the repo copy.
+fn hands_free_command_path() -> Option<String> {
+    if inside_flatpak() {
+        let out = capture_host_or_local(&[
+            "sh",
+            "-c",
+            "printf %s \"${HOME}/.local/bin/saywrite-dictation.sh\"",
+        ])
+        .ok()?;
+        let path = String::from_utf8_lossy(&out).trim().to_string();
+        if path.is_empty() {
+            return None;
+        }
+        let exists = Command::new("flatpak-spawn")
+            .args(["--host", "test", "-x", &path])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if exists {
+            Some(path)
+        } else {
+            None
+        }
+    } else {
+        let repo = find_repo_root_for_dev()?;
+        let script = repo.join("scripts/run-global-dictation.sh");
+        if script.exists() {
+            Some(script.to_string_lossy().into_owned())
+        } else {
+            None
+        }
+    }
+}
+
+fn find_repo_root_for_dev() -> Option<PathBuf> {
+    let exe_dir = env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf));
+    let cwd = env::current_dir().ok();
+    [exe_dir, cwd]
+        .into_iter()
+        .flatten()
+        .find_map(find_repo_root)
+}
+
+/// Make the GNOME custom keybinding a complete, working entry:
+/// ensure the path is in the master list (drop legacy siblings), name +
+/// command + binding are all set, and verify the binding is non-empty
+/// after the write. Safe to call on every app start.
+pub fn ensure_gnome_shortcut(label: &str) -> Result<(), String> {
+    if !gnome_shortcuts_supported() {
+        return Ok(());
+    }
+    let command = hands_free_command_path().ok_or_else(|| {
+        "dictation launcher not found on host; install the host companion first".to_string()
+    })?;
+
+    // Reconcile the master list: keep non-SayWrite entries, drop legacy
+    // SayWrite paths, ensure our path is present. Uses a short python
+    // block so we don't have to parse gsettings list syntax in shell.
+    // sys.argv: [keep_path, drop_path_1, drop_path_2, ...]
+    const RECONCILE_PY: &str = concat!(
+        "import ast, subprocess, sys\n",
+        "raw = subprocess.check_output(['gsettings','get','org.gnome.settings-daemon.plugins.media-keys','custom-keybindings']).decode()\n",
+        "try:\n",
+        "    paths = ast.literal_eval(raw.strip())\n",
+        "except Exception:\n",
+        "    paths = []\n",
+        "keep_path = sys.argv[1]\n",
+        "drop = set(sys.argv[2:])\n",
+        "result = [p for p in paths if p not in drop and p != keep_path]\n",
+        "result.append(keep_path)\n",
+        "subprocess.check_call(['gsettings','set','org.gnome.settings-daemon.plugins.media-keys','custom-keybindings', repr(result)])\n",
+    );
+    let mut reconcile_args: Vec<&str> = vec!["python3", "-c", RECONCILE_PY, HANDS_FREE_PATH];
+    reconcile_args.extend_from_slice(LEGACY_PATHS);
+    run_host_or_local(&reconcile_args)?;
+
+    set_gnome_keybinding_field("name", "SayWrite Hands-Free Dictation")?;
+    set_gnome_keybinding_field("command", &command)?;
+    let binding = shortcut_to_gnome_binding(label);
+    set_gnome_keybinding_field("binding", &binding)?;
+
+    let actual = get_gnome_keybinding_field("binding").unwrap_or_default();
+    if actual.is_empty() {
+        return Err("GNOME accepted the keybinding write but binding is still empty".into());
+    }
+    Ok(())
+}
+
+/// On startup, if the keybinding is missing/empty/stale, re-install it.
+/// Never fails loudly — this is a best-effort self-heal.
+pub fn self_heal_gnome_shortcut(label: &str) {
+    if !gnome_shortcuts_supported() {
+        return;
+    }
+    let current_binding = get_gnome_keybinding_field("binding").unwrap_or_default();
+    let current_command = get_gnome_keybinding_field("command").unwrap_or_default();
+    let expected_command = hands_free_command_path();
+    let needs_fix = current_binding.is_empty()
+        || current_command.is_empty()
+        || expected_command
+            .as_deref()
+            .map(|c| c != current_command)
+            .unwrap_or(false);
+    if !needs_fix {
+        return;
+    }
+    if let Err(e) = ensure_gnome_shortcut(label) {
+        eprintln!("SayWrite: could not install GNOME shortcut automatically: {e}");
+    } else {
+        eprintln!("SayWrite: installed GNOME hands-free shortcut for {label}");
     }
 }
 
@@ -619,21 +738,6 @@ fn gnome_shortcut_command() -> Option<String> {
     }
 
     Some("Create a GNOME custom shortcut that runs the SayWrite host toggle command.".into())
-}
-
-fn gnome_shortcut_script_path() -> Option<PathBuf> {
-    if let Some(root) = bundled_asset_root() {
-        let script = root.join("install-gnome-shortcut.sh");
-        let toggle_helper = root.join("run-global-dictation.sh");
-        if script.exists() && toggle_helper.exists() {
-            return Some(script);
-        }
-    }
-
-    repo_root().and_then(|root| {
-        let script = root.join("scripts/install-gnome-shortcut.sh");
-        script.exists().then_some(script)
-    })
 }
 
 fn bundled_asset_root() -> Option<PathBuf> {

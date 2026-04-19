@@ -5,8 +5,6 @@ set -euo pipefail
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}"
 LOCK_FILE="${RUNTIME_DIR}/saywrite-hotkey.lock"
 STAMP_FILE="${RUNTIME_DIR}/saywrite-hotkey.last"
-STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
-SESSION_MARKER="${STATE_HOME}/saywrite/host-session.pid"
 NOW_MS="$(date +%s%3N)"
 DEBOUNCE_MS=900
 
@@ -22,10 +20,6 @@ if [[ -f "${STAMP_FILE}" ]]; then
   if [[ "${LAST_MS}" =~ ^[0-9]+$ ]] && (( NOW_MS - LAST_MS < DEBOUNCE_MS )); then
     exit 0
   fi
-fi
-
-if [[ ! -f "${SESSION_MARKER}" ]]; then
-  exit 0
 fi
 
 if ! busctl --user status io.github.saywrite.Host &>/dev/null; then

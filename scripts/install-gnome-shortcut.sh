@@ -4,7 +4,14 @@ set -euo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HANDS_FREE_PATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/saywrite-hands-free/"
-HANDS_FREE_COMMAND="${SELF_DIR}/run-global-dictation.sh"
+# Prefer the host-installed launcher (deployed by scripts/install-host.sh)
+# so the command path works for Flatpak users. Fall back to the repo script
+# only in dev checkouts where the host companion hasn't been installed yet.
+if [[ -x "${HOME}/.local/bin/saywrite-dictation.sh" ]]; then
+  HANDS_FREE_COMMAND="${HOME}/.local/bin/saywrite-dictation.sh"
+else
+  HANDS_FREE_COMMAND="${SELF_DIR}/run-global-dictation.sh"
+fi
 LEGACY_PATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/saywrite/"
 OLD_QUICK_PATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/saywrite-quick/"
 SHORTCUT_LABEL="${1:-Super+Alt+D}"

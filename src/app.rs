@@ -4,7 +4,7 @@ use std::{cell::RefCell, path::Path, process::Command, rc::Rc, thread};
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
-use crate::{config::AppSettings, ui};
+use crate::{config::AppSettings, host_setup, ui};
 
 pub const APP_ID: &str = "io.github.fabio.SayWrite";
 
@@ -59,6 +59,13 @@ fn start_host_daemon() {
     thread::spawn(|| {
         run_user_systemctl(&["unmask", "saywrite-host.service"]);
         run_user_systemctl(&["start", "saywrite-host.service"]);
+        // Self-heal the GNOME hands-free keybinding on every launch: on
+        // fresh Flatpak installs nothing else sets the command path, and
+        // previous versions could leave the binding field empty after a
+        // cancelled capture. Cheap (a couple of gsettings calls) and
+        // idempotent when the keybinding is already correct.
+        let label = AppSettings::load().global_shortcut_label;
+        host_setup::self_heal_gnome_shortcut(&label);
     });
 }
 

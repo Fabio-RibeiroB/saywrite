@@ -40,9 +40,12 @@
   <releases>
     <release version="0.3.3" date="2026-04-19">
       <description>
-        <p>Onboarding re-runs after a fresh Flatpak install or upgrade.</p>
+        <p>Dictation hotkey now works out of the box.</p>
         <ul>
-          <li>Onboarding completion is now tied to the installed Flatpak commit, so reinstalling or upgrading the app shows onboarding again and gives users a chance to re-install the GNOME fallback shortcut if the portal isn't available</li>
+          <li>Onboarding completion is tied to the installed Flatpak commit, so reinstalling or upgrading re-runs onboarding</li>
+          <li>Hands-free GNOME shortcut self-heals on every launch when the GlobalShortcuts portal is unavailable — installs or repairs the custom keybinding automatically so users don't have to run any setup script</li>
+          <li>Shortcut command path now points to the host-deployed launcher (~/.local/bin/saywrite-dictation.sh) instead of the dev-only repo path, so the hotkey fires for Flatpak users</li>
+          <li>Fixed the launcher script silently no-op'ing on the removed state-marker file</li>
         </ul>
       </description>
     </release>
