@@ -38,6 +38,15 @@
   </recommends>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.3.0" date="2026-04-19">
+      <description>
+        <p>Reliability fix for Direct Typing on fresh Flatpak installs.</p>
+        <ul>
+          <li>Host companion now uses D-Bus name ownership to detect the app, fixing a PID-namespace mismatch that left the daemon "active but unreachable" after install on Flatpak</li>
+          <li>Settings surfaces host daemon journal output when install succeeds but the daemon can't be reached, so failures explain themselves</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-04-11">
       <description>
         <p>First supported release targeting GNOME Wayland.</p>
