@@ -38,6 +38,14 @@
   </recommends>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.3.1" date="2026-04-19">
+      <description>
+        <p>Startup reliability fix.</p>
+        <ul>
+          <li>Host daemon start no longer blocks the GTK main loop, so repeated launches don't pile up as orphaned processes and time out with "Failed to register"</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-04-19">
       <description>
         <p>Reliability fix for Direct Typing on fresh Flatpak installs.</p>

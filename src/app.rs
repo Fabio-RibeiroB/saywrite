@@ -1,5 +1,5 @@
 use libadwaita as adw;
-use std::{cell::RefCell, path::Path, process::Command, rc::Rc};
+use std::{cell::RefCell, path::Path, process::Command, rc::Rc, thread};
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
@@ -56,8 +56,10 @@ fn load_css() {
 }
 
 fn start_host_daemon() {
-    run_user_systemctl(&["unmask", "saywrite-host.service"]);
-    run_user_systemctl(&["start", "saywrite-host.service"]);
+    thread::spawn(|| {
+        run_user_systemctl(&["unmask", "saywrite-host.service"]);
+        run_user_systemctl(&["start", "saywrite-host.service"]);
+    });
 }
 
 fn stop_host_daemon() {
