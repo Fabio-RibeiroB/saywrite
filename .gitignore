@@ -5,4 +5,6 @@ saywrite.gresource
 
 vendor/cargo/
 build-dir/
+build-repo/
 .flatpak-builder/
+*.flatpak
