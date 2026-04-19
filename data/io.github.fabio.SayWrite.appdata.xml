@@ -38,6 +38,14 @@
   </recommends>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.3.3" date="2026-04-19">
+      <description>
+        <p>Onboarding re-runs after a fresh Flatpak install or upgrade.</p>
+        <ul>
+          <li>Onboarding completion is now tied to the installed Flatpak commit, so reinstalling or upgrading the app shows onboarding again and gives users a chance to re-install the GNOME fallback shortcut if the portal isn't available</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.2" date="2026-04-19">
       <description>
         <p>Removes host daemon launch deadlock.</p>

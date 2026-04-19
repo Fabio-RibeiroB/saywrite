@@ -71,6 +71,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub onboarding_complete: bool,
     #[serde(default)]
+    pub onboarding_install_id: Option<String>,
+    #[serde(default)]
     pub local_model_path: Option<PathBuf>,
     #[serde(default = "default_cloud_api_base")]
     pub cloud_api_base: String,
@@ -96,6 +98,7 @@ impl Default for AppSettings {
         Self {
             provider_mode: default_provider_mode(),
             onboarding_complete: false,
+            onboarding_install_id: None,
             local_model_path: default_model.exists().then_some(default_model),
             cloud_api_base: default_cloud_api_base(),
             cloud_api_key: String::new(),
@@ -146,7 +149,20 @@ impl AppSettings {
             let _ = parsed.save();
         }
 
+        if parsed.onboarding_complete {
+            let current = current_install_id();
+            if current != parsed.onboarding_install_id {
+                parsed.onboarding_complete = false;
+                parsed.onboarding_install_id = None;
+            }
+        }
+
         parsed
+    }
+
+    pub fn mark_onboarded(&mut self) {
+        self.onboarding_complete = true;
+        self.onboarding_install_id = current_install_id();
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
@@ -271,6 +287,23 @@ fn settings_path_for_base(base: &Path) -> PathBuf {
 
 fn inside_flatpak() -> bool {
     Path::new("/.flatpak-info").exists()
+}
+
+/// Returns a string that uniquely identifies the current Flatpak install
+/// (the deployed app-commit hash from /.flatpak-info). Returns None outside
+/// of Flatpak, which effectively disables install-based onboarding resets
+/// for dev/source runs.
+fn current_install_id() -> Option<String> {
+    let raw = fs::read_to_string("/.flatpak-info").ok()?;
+    for line in raw.lines() {
+        if let Some(rest) = line.strip_prefix("app-commit=") {
+            let value = rest.trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
 }
 
 #[cfg(unix)]

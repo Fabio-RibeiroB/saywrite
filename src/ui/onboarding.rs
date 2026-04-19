@@ -56,7 +56,7 @@ where
         move || {
             {
                 let mut state = settings.borrow_mut();
-                state.onboarding_complete = true;
+                state.mark_onboarded();
                 let _ = state.save();
             }
             window.close();
