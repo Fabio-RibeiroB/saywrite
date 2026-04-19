@@ -347,14 +347,14 @@ fn shortcut_page(
     let (mode_label, body_text, hint_text) = if direct_typing {
         (
             "Direct Typing",
-            "Press the hotkey to start dictating. Press it again to stop. Your words land directly in the active text field — no clipboard, no pasting.",
+            "Just press the hotkey to start dictating — no need to hold it. Press it again to stop. Your words land directly in the active text field — no clipboard, no pasting.",
             None,
         )
     } else {
         (
             "Clipboard Mode",
-            "Press the hotkey to start dictating. Press it again to stop. Your words are copied to the clipboard — paste them where you need.",
-            Some("To enable Direct Typing, open Settings and install the host companion after setup."),
+            "Just press the hotkey to start dictating — no need to hold it. Press it again to stop. Your words are copied to the clipboard — paste them where you need.",
+            Some("Direct Typing inserts your words straight into the focused app — no clipboard or pasting needed. To enable it, open Settings and install the host companion after setup."),
         )
     };
 
