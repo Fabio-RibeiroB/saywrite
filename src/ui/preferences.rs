@@ -620,6 +620,7 @@ where
 
     // ── Diagnostics ───────────────────────────────────────────────────────────
     let probe = probe_runtime(&settings.borrow());
+    let host_diag = crate::host_setup::host_diagnostics();
     let diag_group = adw::PreferencesGroup::builder()
         .title("Diagnostics")
         .build();
@@ -645,10 +646,21 @@ where
             },
         ),
         ("Insertion", probe.insertion_label.clone()),
+        ("Host session", host_diag.desktop_label.clone()),
+        ("Host files", host_diag.host_files_label.clone()),
+        ("Host checks", host_diag.dependency_label.clone()),
     ] {
         let row = adw::ActionRow::builder()
             .title(label)
             .subtitle(&value)
+            .build();
+        diag_group.add(&row);
+    }
+
+    if let Some(hint) = host_diag.package_hint.as_ref() {
+        let row = adw::ActionRow::builder()
+            .title("Ubuntu/Zorin")
+            .subtitle(hint)
             .build();
         diag_group.add(&row);
     }

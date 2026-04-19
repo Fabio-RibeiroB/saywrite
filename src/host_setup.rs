@@ -16,6 +16,28 @@ pub struct HostSetupStatus {
     pub gnome_shortcut_command: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct HostDiagnostics {
+    pub desktop_label: String,
+    pub host_files_label: String,
+    pub dependency_label: String,
+    pub package_hint: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HostProfile {
+    GnomeWayland,
+    OtherWayland,
+    X11,
+    Other,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CommandRequirement {
+    command: &'static str,
+    package_hint: Option<&'static str>,
+}
+
 pub fn can_install_in_app() -> bool {
     install_script_path().is_some()
 }
@@ -31,12 +53,25 @@ pub fn host_setup_status() -> HostSetupStatus {
     let dbus_service_path = host_dbus_service_path();
 
     HostSetupStatus {
-        binary_installed: binary_path.exists(),
-        systemd_service_installed: systemd_service_path.exists(),
-        dbus_service_installed: dbus_service_path.exists(),
+        binary_installed: host_path_exists(&binary_path),
+        systemd_service_installed: host_path_exists(&systemd_service_path),
+        dbus_service_installed: host_path_exists(&dbus_service_path),
         host_running: host_integration::host_status().is_some(),
         install_command: host_install_command(),
         gnome_shortcut_command: gnome_shortcut_command(),
+    }
+}
+
+pub fn host_diagnostics() -> HostDiagnostics {
+    let setup = host_setup_status();
+    let profile = host_profile();
+    let missing = missing_requirements(profile);
+
+    HostDiagnostics {
+        desktop_label: desktop_label(profile),
+        host_files_label: host_files_label(&setup),
+        dependency_label: dependency_label(profile, &missing),
+        package_hint: dependency_package_hint(&missing),
     }
 }
 
@@ -111,8 +146,7 @@ pub fn install_host_companion() -> std::sync::mpsc::Receiver<Result<HostInstallU
                 let stderr = String::from_utf8_lossy(&out.stderr);
                 let stdout = String::from_utf8_lossy(&out.stdout);
                 let text = if !stderr.is_empty() { stderr } else { stdout };
-                let snippet = text.lines().take(8).collect::<Vec<_>>().join("
-");
+                let snippet = text.lines().take(8).collect::<Vec<_>>().join("\n");
                 let _ = tx.send(Err(format!("Install failed:\n{snippet}")));
             }
             Err(err) => {
@@ -143,7 +177,11 @@ pub fn apply_shortcut_change(shortcut: &str) -> Result<(), String> {
                 Ok(out) if !out.status.success() => {
                     let stderr = String::from_utf8_lossy(&out.stderr);
                     let stdout = String::from_utf8_lossy(&out.stdout);
-                    let text = if !stderr.trim().is_empty() { stderr } else { stdout };
+                    let text = if !stderr.trim().is_empty() {
+                        stderr
+                    } else {
+                        stdout
+                    };
                     let snippet = text.lines().take(6).collect::<Vec<_>>().join("\n");
                     return Err(format!("Failed to apply desktop shortcut:\n{snippet}"));
                 }
@@ -240,8 +278,242 @@ fn inside_flatpak() -> bool {
     Path::new("/.flatpak-info").exists()
 }
 
+fn host_profile() -> HostProfile {
+    let desktop = env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    let session = env::var("XDG_SESSION_TYPE").unwrap_or_default();
+    let gnome = desktop
+        .split(':')
+        .any(|part| part.eq_ignore_ascii_case("gnome"));
+
+    if session.eq_ignore_ascii_case("wayland") && gnome {
+        HostProfile::GnomeWayland
+    } else if session.eq_ignore_ascii_case("wayland") {
+        HostProfile::OtherWayland
+    } else if session.eq_ignore_ascii_case("x11") {
+        HostProfile::X11
+    } else {
+        HostProfile::Other
+    }
+}
+
+fn host_path_exists(path: &Path) -> bool {
+    if !inside_flatpak() {
+        return path.exists();
+    }
+
+    let Some(path_str) = path.to_str() else {
+        eprintln!("host path check skipped for non-UTF-8 path: {:?}", path);
+        return false;
+    };
+
+    match Command::new("flatpak-spawn")
+        .args(["--host", "test", "-e", path_str])
+        .status()
+    {
+        Ok(status) => status.success(),
+        Err(err) => {
+            eprintln!("host path check failed for {}: {}", path.display(), err);
+            false
+        }
+    }
+}
+
+fn host_command_exists(command: &str) -> bool {
+    let probe = format!("command -v {command} >/dev/null 2>&1");
+    let status = if inside_flatpak() {
+        Command::new("flatpak-spawn")
+            .args(["--host", "sh", "-lc", &probe])
+            .status()
+    } else {
+        Command::new("sh").args(["-lc", &probe]).status()
+    };
+
+    match status {
+        Ok(status) => status.success(),
+        Err(err) => {
+            eprintln!("host command probe failed for {}: {}", command, err);
+            false
+        }
+    }
+}
+
+fn desktop_label(profile: HostProfile) -> String {
+    match profile {
+        HostProfile::GnomeWayland => "GNOME Wayland".into(),
+        HostProfile::OtherWayland => "Wayland".into(),
+        HostProfile::X11 => "X11".into(),
+        HostProfile::Other => {
+            let desktop =
+                env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "Unknown desktop".into());
+            let session = env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "unknown session".into());
+            format!("{desktop} ({session})")
+        }
+    }
+}
+
+fn host_files_label(setup: &HostSetupStatus) -> String {
+    let mut missing = Vec::new();
+    if !setup.binary_installed {
+        missing.push("binary");
+    }
+    if !setup.systemd_service_installed {
+        missing.push("systemd user service");
+    }
+    if !setup.dbus_service_installed {
+        missing.push("D-Bus service");
+    }
+
+    if missing.is_empty() {
+        "Host binary, systemd unit, and D-Bus service are present.".into()
+    } else {
+        format!("Missing host files: {}.", missing.join(", "))
+    }
+}
+
+fn requirements_for_profile(profile: HostProfile) -> &'static [CommandRequirement] {
+    const GNOME_WAYLAND: &[CommandRequirement] = &[
+        CommandRequirement {
+            command: "ibus",
+            package_hint: Some("ibus"),
+        },
+        CommandRequirement {
+            command: "gdbus",
+            package_hint: Some("libglib2.0-bin"),
+        },
+        CommandRequirement {
+            command: "busctl",
+            package_hint: Some("systemd"),
+        },
+    ];
+    const OTHER_WAYLAND: &[CommandRequirement] = &[
+        CommandRequirement {
+            command: "wtype",
+            package_hint: Some("wtype"),
+        },
+        CommandRequirement {
+            command: "busctl",
+            package_hint: Some("systemd"),
+        },
+    ];
+    const X11_REQS: &[CommandRequirement] = &[
+        CommandRequirement {
+            command: "xdotool",
+            package_hint: Some("xdotool"),
+        },
+        CommandRequirement {
+            command: "busctl",
+            package_hint: Some("systemd"),
+        },
+    ];
+    const OTHER: &[CommandRequirement] = &[];
+
+    match profile {
+        HostProfile::GnomeWayland => GNOME_WAYLAND,
+        HostProfile::OtherWayland => OTHER_WAYLAND,
+        HostProfile::X11 => X11_REQS,
+        HostProfile::Other => OTHER,
+    }
+}
+
+fn missing_requirements(profile: HostProfile) -> Vec<CommandRequirement> {
+    requirements_for_profile(profile)
+        .iter()
+        .copied()
+        .filter(|req| !host_command_exists(req.command))
+        .collect()
+}
+
+fn dependency_label(profile: HostProfile, missing: &[CommandRequirement]) -> String {
+    if missing.is_empty() {
+        return match profile {
+            HostProfile::GnomeWayland => {
+                "GNOME Wayland host checks look ready for Direct Typing.".into()
+            }
+            HostProfile::OtherWayland => {
+                "Wayland host checks look ready for the current fallback path.".into()
+            }
+            HostProfile::X11 => "X11 host checks look ready for Direct Typing.".into(),
+            HostProfile::Other => {
+                "No desktop-specific host checks are defined for this session.".into()
+            }
+        };
+    }
+
+    let names = missing
+        .iter()
+        .map(|req| req.command)
+        .collect::<Vec<_>>()
+        .join(", ");
+    match profile {
+        HostProfile::GnomeWayland => format!("Missing GNOME Wayland host tools: {names}."),
+        HostProfile::OtherWayland => format!("Missing Wayland host tools: {names}."),
+        HostProfile::X11 => format!("Missing X11 host tools: {names}."),
+        HostProfile::Other => format!("Missing host tools: {names}."),
+    }
+}
+
+fn dependency_package_hint(missing: &[CommandRequirement]) -> Option<String> {
+    let distro = host_os_release();
+    let ubuntu_like = distro
+        .get("ID")
+        .into_iter()
+        .chain(distro.get("ID_LIKE"))
+        .any(|value| {
+            value
+                .split_whitespace()
+                .any(|part| matches!(part, "ubuntu" | "debian" | "zorin"))
+        });
+
+    if !ubuntu_like {
+        return None;
+    }
+
+    let mut packages = Vec::new();
+    for req in missing {
+        if let Some(pkg) = req.package_hint {
+            if !packages.contains(&pkg) {
+                packages.push(pkg);
+            }
+        }
+    }
+
+    if packages.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "Ubuntu/Zorin host packages: sudo apt install {}",
+            packages.join(" ")
+        ))
+    }
+}
+
+fn host_os_release() -> std::collections::HashMap<String, String> {
+    let text = if inside_flatpak() {
+        Command::new("flatpak-spawn")
+            .args(["--host", "cat", "/etc/os-release"])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        std::fs::read_to_string("/etc/os-release").ok()
+    };
+
+    text.map(parse_os_release).unwrap_or_default()
+}
+
+fn parse_os_release(text: String) -> std::collections::HashMap<String, String> {
+    text.lines()
+        .filter_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            Some((key.to_string(), value.trim_matches('"').to_string()))
+        })
+        .collect()
+}
+
 pub fn host_install_instructions() -> String {
     let setup = host_setup_status();
+    let diagnostics = host_diagnostics();
     let mut steps = vec![
         "Enable Direct Typing:".to_string(),
         String::new(),
@@ -253,11 +525,16 @@ pub fn host_install_instructions() -> String {
     }
 
     steps.push(String::new());
+    steps.push(format!("Host session: {}", diagnostics.desktop_label));
+    steps.push(format!("Host checks: {}", diagnostics.dependency_label));
+    if let Some(hint) = diagnostics.package_hint {
+        steps.push(hint);
+    }
+    steps.push(String::new());
     steps.push("After installation:".into());
     steps.push("  systemctl --user status saywrite-host".into());
     steps.push("  journalctl --user -u saywrite-host -f".into());
-    steps.join("
-")
+    steps.join("\n")
 }
 
 fn host_binary_path() -> PathBuf {
@@ -377,7 +654,13 @@ fn gnome_shortcuts_supported() -> bool {
 fn restart_host_service() {
     let _ = if Path::new("/.flatpak-info").exists() {
         Command::new("flatpak-spawn")
-            .args(["--host", "systemctl", "--user", "restart", "saywrite-host.service"])
+            .args([
+                "--host",
+                "systemctl",
+                "--user",
+                "restart",
+                "saywrite-host.service",
+            ])
             .status()
     } else {
         Command::new("systemctl")
