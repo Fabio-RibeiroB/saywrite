@@ -68,11 +68,48 @@ Do not expect universal direct typing support across all Linux desktops yet. The
 
 The Flatpak sandbox cannot inject keystrokes into arbitrary host applications. The host companion runs outside that boundary and handles text insertion. This is an intentional design, not a workaround: the Flatpak handles discovery, onboarding, and settings; the host companion handles system-wide input.
 
-## Installing
+## Getting Started
 
-Flatpak distribution is the planned primary install path. Instructions will be added here when the app reaches a public release.
+SayWrite is distributed as a Flatpak. It is not yet on Flathub, but you can install it directly from a GitHub release or by building locally.
 
-For now, see [Developer Setup](#developer-setup) below.
+### Option 1: Install from a GitHub Release (Recommended)
+
+Each release ships a pre-built `.flatpak` bundle. Grab the latest release from the [Releases page](https://github.com/Fabio-RibeiroB/saywrite/releases) and install it:
+
+```bash
+# Download the latest Flatpak bundle
+curl -L -o saywrite.flatpak \
+  "https://github.com/Fabio-RibeiroB/saywrite/releases/latest/download/saywrite-x86_64.flatpak"
+
+# Install it (this also pulls in the GNOME 48 runtime if needed)
+flatpak install --user ./saywrite.flatpak
+
+# Run it
+flatpak run io.github.fabio.SayWrite
+```
+
+You can also install a specific version by replacing `latest` with a tag, for example `download/v0.3.0/saywrite-x86_64.flatpak`.
+
+### Option 2: Build and Install from Source
+
+If you prefer to build from the repository:
+
+```bash
+# Clone and build
+git clone https://github.com/Fabio-RibeiroB/saywrite.git
+cd saywrite
+flatpak-builder --user --install --force-clean build-dir flatpak/io.github.fabio.SayWrite.json
+
+# Run it
+flatpak run io.github.fabio.SayWrite
+```
+
+### After First Launch
+
+1. Complete the onboarding carousel to set up your microphone and dictation shortcut.
+2. Choose **Local** (whisper.cpp) or **Cloud** (OpenAI-compatible API) as your transcription provider.
+3. For **Direct Typing Mode**, install the host companion from Settings — this enables hotkey-driven dictation with text inserted directly into the focused application.
+4. Without the host companion, **Clipboard Mode** works immediately: dictation copies cleaned text to your clipboard for you to paste anywhere.
 
 ## Why SayWrite
 
