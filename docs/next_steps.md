@@ -2,13 +2,13 @@
 
 SayWrite has crossed the main technical hurdle: hotkey-driven dictation, cleanup, and direct insertion now work on a real GNOME Wayland machine through the in-process native runtime and IBus bridge.
 
-The next phase is simplifying distribution and reducing architectural complexity by moving from Flatpak-first to `.deb`-first, targeting Ubuntu/Debian-based distros.
+The current phase is finishing the native Debian path, removing leftover Flatpak-era assumptions, and keeping the documentation aligned with the supported runtime.
 
 ## Current State
 
 - The GTK app exists with onboarding, main dictation window, settings, diagnostics, and shortcut capture.
 - The app now owns the real dictation workflow on native builds.
-- Global hotkey dictation works through the host path while SayWrite is running.
+- Global hotkey dictation works through the direct-typing controller while SayWrite is running.
 - Local (whisper.cpp) transcription works end to end.
 - Cloud transcription works with OpenAI-compatible APIs.
 - Direct insertion works on the currently validated GNOME Wayland setup via IBus bridge.
@@ -19,9 +19,10 @@ The next phase is simplifying distribution and reducing architectural complexity
 - Shortcut changes update GNOME keybindings directly through native `gsettings` calls.
 - Desktop detection auto-selects the best insertion backend per session (GNOME Wayland, Other Wayland, X11, Other).
 - Insertion capability and result kinds are explicit: `typing`/`clipboard-only`/`notification-only`/`unavailable` and `typed`/`copied`/`notified`/`failed`.
-- Host-side toggle debounce (900ms) prevents repeated shortcut activations from wedging the daemon.
+- Toggle debounce (900ms) prevents repeated shortcut activations from wedging dictation state.
 - Error sanitization maps typed `DictationError` variants to user-friendly messages.
-- Host-side unit tests cover backend classification, result-kind mapping, IBus parsing, error sanitization, and toggle debounce.
+- Integration tests cover backend classification, result-kind mapping, IBus parsing, error sanitization, and toggle debounce.
+- The old `docs/architecture.md`, `docs/holistic_review.md`, `docs/implementation_plan.md`, and `docs/ship_todo.md` files have been removed because they no longer reflect the current branch state.
 
 ## Migration: Flatpak → `.deb`-First
 
@@ -78,7 +79,7 @@ A native `.deb` removes the sandbox boundary entirely. The app runs directly on 
 
 ### Migration Path
 
-1. **Phase 1: `.deb` alongside Flatpak** — Build a `.deb` with `cargo-deb`. Keep the Flatpak. Use the `.deb` for dogfeeding and faster iteration.
+1. **Phase 1: `.deb` first** — Build and validate a native `.deb` with `cargo-deb`. Treat Flatpak as legacy context only while the native path finishes stabilising.
 2. **Phase 2: Merge host into app** — Move `insertion.rs`, `input.rs`, and D-Bus service logic into the main app. Remove `saywrite-host` binary.
 3. **Phase 3: Remove Flatpak-specific code** — Strip `flatpak-spawn`, host lifecycle, D-Bus IPC client. Simplify `app.rs`, `host_setup.rs`, `host_integration.rs`.
 4. **Phase 4: PPA (optional)** — Set up a Launchpad PPA for automatic `apt` updates once the product stabilizes.
@@ -131,11 +132,10 @@ The key UX goal is that users experience one product, not "app plus helper".
 
 ## Completed Milestones
 
-### Package the Host Companion Cleanly ✅
-- In-app installation via `host_setup::install_host_companion()` works end-to-end
-- Settings shows Clipboard Mode vs Direct Typing clearly
-- Host daemon lifecycle tied to GUI (starts on launch, stops and is masked on close)
-- Host refuses to start without app D-Bus name ownership
+### Package the Native Build ✅
+- Native `.deb` packaging is wired up with `cargo-deb`
+- The installed package matches the current in-process runtime
+- Support docs now point at the native release path instead of Flatpak-first setup
 
 ### Harden the IBus Path ✅
 - Fixed race condition, added retry logic, comprehensive logging
@@ -163,6 +163,14 @@ The key UX goal is that users experience one product, not "app plus helper".
 - `host_setup.rs` detects GNOME Wayland, Other Wayland, X11, Other
 - Per-profile dependency checks with Ubuntu/Zorin package hints
 - Diagnostics show desktop label, host files status, and dependency status
+
+### Remove Flatpak Assumptions ✅
+- Flatpak-specific runtime behaviour has been removed from the native path
+- The old Flatpak manifest and migration-era planning docs have been deleted
+
+### Tauri Note
+
+There is an exploratory Tauri sketch in `.opencode/plans/tauri_migration_plan.md`, but it is not the active implementation plan. It needs to be rewritten around the current native runtime before it becomes actionable.
 
 ## Release Priorities
 
@@ -308,6 +316,12 @@ To remove once the native path is working:
 4. Move UI away from substring error matching toward typed error handling
 5. Consolidate async state model (timer polling → event-driven)
 6. Cross-desktop validation on non-GNOME setups
+
+### Doc Hygiene
+
+- Keep `next_steps.md` as the active plan.
+- Keep `support_matrix.md` as the release truth table.
+- Do not reintroduce removed planning docs unless they again become current source of truth.
 
 ## Non-Blocking
 

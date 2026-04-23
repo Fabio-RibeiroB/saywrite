@@ -1,11 +1,17 @@
 # AGENTS.md — SayWrite Codebase Guide
 
-SayWrite is a Linux-first dictation app with a Rust GTK4/libadwaita shell. The goal is simple: speak, get cleaned polished text delivered back to the active app, with no external setup docs.
+SayWrite is a Linux-first dictation app built with Rust. The goal is simple: speak, get cleaned polished text delivered back to the active app, with no external setup docs.
+
+## Design Philosophy
+
+Code should be written smartly. The codebase should be easy to read with re-used and maintainable code.
+The app should be sleek, modern and easy to use. Using it should have that fun-feel and be well designed.
+It should look and feel beautiful. If someone gets stuck setting it up or using it then it's badly designed.
 
 ## Stack
 
 - **Language**: Rust 2021
-- **UI**: GTK4 + libadwaita
+- **UI**: Currently GTK4 + libadwaita but should be Tauri
 - **Audio**: GStreamer 1.0
 - **ASR**: whisper.cpp (local), configurable cloud API (OpenAI-compatible)
 - **IPC**: D-Bus via `zbus` for compatibility paths and desktop integration
@@ -13,29 +19,29 @@ SayWrite is a Linux-first dictation app with a Rust GTK4/libadwaita shell. The g
 
 ## Current Layout
 
-| File | Role |
-|------|------|
-| `src/main.rs` | GTK application entry point |
-| `src/app.rs` | GTK application + activation flow |
-| `src/lib.rs` | shared library surface |
-| `src/config.rs` | `AppSettings`, `ProviderMode`, `ModelSize`, JSON load/save, XDG paths |
-| `src/cleanup.rs` | `cleanup_transcript()` |
-| `src/dictation.rs` | microphone session control, whisper.cpp CLI transcription, cloud handoff, session state |
-| `src/model_installer.rs` | model download, validation, and cache flow |
-| `src/host_integration.rs` | in-process direct-typing integration + compatibility D-Bus interface |
-| `src/host_api.rs` | shared D-Bus constants, host status types, capability/result enums |
-| `src/host_setup.rs` | desktop detection, diagnostics, GNOME shortcut helpers |
-| `src/input.rs` | shared hotkey + IBus integration |
-| `src/insertion.rs` | shared desktop insertion backends |
-| `src/service.rs` | shared dictation/insertion controller |
-| `src/runtime.rs` | readiness probing (GPU, whisper, insertion) |
-| `src/ui/main_window/` | main dictation window |
-| `src/ui/async_poll.rs` | GTK-safe background task polling helper |
-| `src/ui/onboarding.rs` | onboarding carousel |
-| `src/ui/preferences.rs` | preferences and diagnostics |
-| `src/ui/shortcut_capture.rs` | keyboard shortcut capture dialog |
-| `src/bin/saywrite-host/` | historical standalone daemon target kept during migration |
-| `scripts/install-gnome-shortcut.sh` | GNOME custom shortcut fallback installer |
+| File                                | Role                                                                                    |
+| ----------------------------------- | --------------------------------------------------------------------------------------- |
+| `src/main.rs`                       | GTK application entry point                                                             |
+| `src/app.rs`                        | GTK application + activation flow                                                       |
+| `src/lib.rs`                        | shared library surface                                                                  |
+| `src/config.rs`                     | `AppSettings`, `ProviderMode`, `ModelSize`, JSON load/save, XDG paths                   |
+| `src/cleanup.rs`                    | `cleanup_transcript()`                                                                  |
+| `src/dictation.rs`                  | microphone session control, whisper.cpp CLI transcription, cloud handoff, session state |
+| `src/model_installer.rs`            | model download, validation, and cache flow                                              |
+| `src/host_integration.rs`           | in-process direct-typing integration + compatibility D-Bus interface                    |
+| `src/host_api.rs`                   | shared D-Bus constants, host status types, capability/result enums                      |
+| `src/host_setup.rs`                 | desktop detection, diagnostics, GNOME shortcut helpers                                  |
+| `src/input.rs`                      | shared hotkey + IBus integration                                                        |
+| `src/insertion.rs`                  | shared desktop insertion backends                                                       |
+| `src/service.rs`                    | shared dictation/insertion controller                                                   |
+| `src/runtime.rs`                    | readiness probing (GPU, whisper, insertion)                                             |
+| `src/ui/main_window/`               | main dictation window                                                                   |
+| `src/ui/async_poll.rs`              | GTK-safe background task polling helper                                                 |
+| `src/ui/onboarding.rs`              | onboarding carousel                                                                     |
+| `src/ui/preferences.rs`             | preferences and diagnostics                                                             |
+| `src/ui/shortcut_capture.rs`        | keyboard shortcut capture dialog                                                        |
+| `src/bin/saywrite-host/`            | historical standalone daemon target kept during migration                               |
+| `scripts/install-gnome-shortcut.sh` | GNOME custom shortcut fallback installer                                                |
 
 ## User-Facing Modes
 
@@ -102,10 +108,6 @@ When writing copy, diagnostics, or onboarding text, use these mode names. Do not
 
 ## Docs
 
-- `docs/README.md` — which docs are current vs archived
+- `docs/README.md` — documentation index
 - `docs/next_steps.md` — active plan and release priorities
-- `docs/holistic_review.md` — current codebase assessment
-- `docs/architecture.md` — historical design rationale and boundaries
-- `docs/roadmap.md` — high-level product stages
-- `docs/implementation_plan.md` — archived earlier planning phase
-- `docs/ship_todo.md` — archived earlier ship checklist
+- `docs/support_matrix.md` — release validation and supported-environment claims

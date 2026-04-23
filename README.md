@@ -178,8 +178,6 @@ See [docs/README.md](docs/README.md) for the documentation index, including whic
 Key docs:
 - [docs/next_steps.md](docs/next_steps.md) — active product and engineering priorities
 - [docs/support_matrix.md](docs/support_matrix.md) — release validation and supported environments
-- [docs/holistic_review.md](docs/holistic_review.md) — current technical assessment
-- [docs/architecture.md](docs/architecture.md) — design rationale (historical; not the current implementation plan)
 
 ## Current Implementation Status
 
