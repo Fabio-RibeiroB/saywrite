@@ -302,6 +302,11 @@ fn hands_free_command_path() -> Option<String> {
             None
         }
     } else {
+        let packaged = PathBuf::from("/usr/bin/saywrite-dictation.sh");
+        if packaged.is_file() {
+            return Some(packaged.to_string_lossy().into_owned());
+        }
+
         let repo = find_repo_root_for_dev()?;
         let script = repo.join("scripts/run-global-dictation.sh");
         if script.exists() {
@@ -696,21 +701,27 @@ pub fn host_install_instructions() -> String {
 }
 
 fn host_binary_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("~"))
-        .join(".local/bin/saywrite-host")
+    host_binary_paths()
+        .into_iter()
+        .find(|path| host_path_exists(path))
+        .or_else(|| host_binary_paths().into_iter().next())
+        .unwrap_or_else(|| PathBuf::from("saywrite-host"))
 }
 
 fn host_systemd_service_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("~"))
-        .join(".config/systemd/user/saywrite-host.service")
+    host_systemd_service_paths()
+        .into_iter()
+        .find(|path| host_path_exists(path))
+        .or_else(|| host_systemd_service_paths().into_iter().next())
+        .unwrap_or_else(|| PathBuf::from("saywrite-host.service"))
 }
 
 fn host_dbus_service_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("~"))
-        .join(".local/share/dbus-1/services/io.github.saywrite.Host.service")
+    host_dbus_service_paths()
+        .into_iter()
+        .find(|path| host_path_exists(path))
+        .or_else(|| host_dbus_service_paths().into_iter().next())
+        .unwrap_or_else(|| PathBuf::from("io.github.saywrite.Host.service"))
 }
 
 fn host_install_command() -> String {
@@ -759,6 +770,34 @@ fn install_script_path() -> Option<PathBuf> {
         let script = root.join("scripts/install-host.sh");
         script.exists().then_some(script)
     })
+}
+
+fn host_binary_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".local/bin/saywrite-host"));
+    }
+    paths.push(PathBuf::from("/usr/bin/saywrite-host"));
+    paths
+}
+
+fn host_systemd_service_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".config/systemd/user/saywrite-host.service"));
+    }
+    paths.push(PathBuf::from("/usr/lib/systemd/user/saywrite-host.service"));
+    paths.push(PathBuf::from("/lib/systemd/user/saywrite-host.service"));
+    paths
+}
+
+fn host_dbus_service_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".local/share/dbus-1/services/io.github.saywrite.Host.service"));
+    }
+    paths.push(PathBuf::from("/usr/share/dbus-1/services/io.github.saywrite.Host.service"));
+    paths
 }
 
 fn uses_repo_assets(install_script: &Path) -> bool {

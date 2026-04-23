@@ -6,6 +6,7 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
   <developer_name>Fabio</developer_name>
+  <url type="homepage">https://github.com/Fabio-RibeiroB/saywrite</url>
   <description>
     <p>
       SayWrite turns your voice into polished text. Press a shortcut, speak
@@ -18,10 +19,10 @@
       on older hardware.
     </p>
     <p>
-      This release supports GNOME on Wayland. Direct text insertion uses the
-      IBus input method bridge and has been validated on GNOME Wayland setups.
-      On other desktops, SayWrite falls back to clipboard delivery automatically
-      and reports which mode is active so you always know what to expect.
+      Direct text insertion is currently validated on GNOME Wayland. The app
+      still uses the separate <code>saywrite-host</code> companion for direct
+      typing, while clipboard delivery remains available when host integration
+      is not active.
     </p>
   </description>
   <launchable type="desktop-id">io.github.fabio.SayWrite.desktop</launchable>
@@ -38,6 +39,16 @@
   </recommends>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.4.0" type="development" date="2026-04-23">
+      <description>
+        <p>Debian-first migration work in progress.</p>
+        <ul>
+          <li>Native Debian-family packaging is becoming the primary dogfooding target for this branch</li>
+          <li>Flatpak remains a transitional package while the current app-plus-host runtime is still in place</li>
+          <li>Direct Typing still depends on <code>saywrite-host</code>; the validated path remains GNOME Wayland</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.5" date="2026-04-19">
       <description>
         <p>Hotkey repair and host startup reliability fixes.</p>

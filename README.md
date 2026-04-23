@@ -2,7 +2,7 @@
 
 SayWrite is a Linux dictation app. Press a hotkey, speak, and your words land in the active text field — cleaned up and ready to use.
 
-Install through Flatpak. Use it right away with clipboard delivery. Optionally enable direct typing for deeper system integration.
+The `deb-first` branch is moving SayWrite to a Debian-first release model. Native Debian/Ubuntu/Zorin installs are the primary dogfooding target. Flatpak remains available as a transitional path while the runtime still uses the separate host companion for direct typing.
 
 > **Early work in progress.** SayWrite is still under active development. It works well on the setups it has been tested on, but it may not work for you yet. Direct typing support is desktop-dependent, and not every Linux environment is validated. If you try it and something breaks, that feedback is welcome.
 
@@ -19,11 +19,11 @@ Works with the Flatpak app alone. No host setup required.
 - SayWrite records, transcribes, cleans up your text, and copies it to the clipboard
 - paste into any application
 
-This is the default mode and works on any desktop where the Flatpak runs.
+This is the default mode and works on the current builds without host setup.
 
 ### Direct Typing Mode
 
-Requires the host companion (`saywrite-host`) installed alongside the Flatpak.
+Requires the host companion (`saywrite-host`) installed alongside the app.
 
 - press the dictation hotkey
 - speak
@@ -42,15 +42,15 @@ You can replay onboarding from Settings at any time if you want to re-check micr
 | wlroots Wayland + wtype | Untested | Supported |
 | Other Wayland compositors | Not available | Supported |
 
-**Supported** means tested end-to-end on real hardware. **Untested** means the code path exists but has not yet been validated. Clipboard Mode works everywhere the Flatpak runs.
+**Supported** means tested end-to-end on real hardware. **Untested** means the code path exists but has not yet been validated.
 
-Do not expect universal direct typing support across all Linux desktops yet. The GNOME Wayland path (via IBus) is the current validated path. More environments will be confirmed as testing expands.
+Do not expect universal direct typing support across Linux desktops yet. GNOME Wayland via IBus is the current validated path. More environments will be confirmed only after they are tested.
 
 ## Current Product Model
 
 ```
 ┌─────────────────────────────┐
-│  Flatpak app (GTK/Adwaita)  │  ← install via Flatpak / Flathub
+│  Native app (GTK/Adwaita)   │  ← primary target on deb-first
 │  settings · diagnostics     │
 │  transcript preview         │
 └────────────┬────────────────┘
@@ -63,46 +63,46 @@ Do not expect universal direct typing support across all Linux desktops yet. The
              │
              ▼
 ┌─────────────────────────────┐
-│  saywrite-host (native)     │  ← installed outside Flatpak sandbox
+│  saywrite-host (native)     │  ← still required for Direct Typing
 │  IBus engine · fallbacks    │
 └─────────────────────────────┘
 ```
 
-The Flatpak sandbox cannot inject keystrokes into arbitrary host applications. The host companion runs outside that boundary and handles text insertion. This is an intentional design, not a workaround: the Flatpak handles discovery, onboarding, and settings; the host companion handles system-wide input.
+Today the app still uses the split runtime: the GTK app handles onboarding, settings, and dictation UI, and `saywrite-host` handles system-wide insertion. This branch is changing packaging first. The host companion is not gone yet.
 
 ## Getting Started
 
-SayWrite is distributed as a Flatpak. It is not yet on Flathub, but you can install it directly from a GitHub release or by building locally.
+This branch is moving toward native Debian packaging. Until dedicated `.deb` artifacts are published, the practical dogfooding path is a native source build on Debian-family systems. Flatpak is still available as a secondary path for comparison and transition work.
 
-### Option 1: Install from a GitHub Release (Recommended)
+### Option 1: Native Build on Debian/Ubuntu/Zorin (Recommended on `deb-first`)
 
-Each release ships a pre-built `.flatpak` bundle. Grab the latest release from the [Releases page](https://github.com/Fabio-RibeiroB/saywrite/releases) and install it:
-
-```bash
-# Download the latest Flatpak bundle
-curl -L -o saywrite.flatpak \
-  "https://github.com/Fabio-RibeiroB/saywrite/releases/latest/download/saywrite-x86_64.flatpak"
-
-# Install it (this also pulls in the GNOME 48 runtime if needed)
-flatpak install --user ./saywrite.flatpak
-
-# Run it
-flatpak run io.github.fabio.SayWrite
-```
-
-You can also install a specific version by replacing `latest` with a tag, for example `download/v0.3.0/saywrite-x86_64.flatpak`.
-
-### Option 2: Build and Install from Source
-
-If you prefer to build from the repository:
+Use this path if you are testing the Debian-first migration. It keeps you on the native runtime model we are moving toward.
 
 ```bash
-# Clone and build
 git clone https://github.com/Fabio-RibeiroB/saywrite.git
 cd saywrite
-flatpak-builder --user --install --force-clean build-dir flatpak/io.github.fabio.SayWrite.json
+cargo build --release
 
-# Run it
+# Run the app
+cargo run --release
+```
+
+For Direct Typing on the current codebase, also install the host companion:
+
+```bash
+./scripts/install-host.sh
+```
+
+Dedicated `.deb` packaging is the next migration slice on this branch. This README does not claim that published `.deb` bundles already exist.
+
+### Option 2: Flatpak (Transitional)
+
+Flatpak remains useful for comparison, regression checking, and existing users. It is no longer the primary dogfooding target on `deb-first`.
+
+```bash
+curl -L -o saywrite.flatpak \
+  "https://github.com/Fabio-RibeiroB/saywrite/releases/latest/download/saywrite-x86_64.flatpak"
+flatpak install --user ./saywrite.flatpak
 flatpak run io.github.fabio.SayWrite
 ```
 
@@ -110,7 +110,7 @@ flatpak run io.github.fabio.SayWrite
 
 1. Complete the onboarding carousel to set up your microphone and dictation shortcut.
 2. Choose **Local** (whisper.cpp) or **Cloud** (OpenAI-compatible API) as your transcription provider.
-3. For **Direct Typing Mode**, install the host companion from Settings — this enables hotkey-driven dictation with text inserted directly into the focused application.
+3. For **Direct Typing Mode**, install the host companion from Settings or via `./scripts/install-host.sh` — this enables hotkey-driven dictation with text inserted directly into the focused application.
 4. Without the host companion, **Clipboard Mode** works immediately: dictation copies cleaned text to your clipboard for you to paste anywhere.
 
 ## Why SayWrite
@@ -126,6 +126,8 @@ SayWrite takes the opposite approach: opinionated defaults, polished UI, and sys
 ## Developer Setup
 
 > **Note:** This section is for contributors building from source. It is not the end-user install flow.
+
+On `deb-first`, native development and native dogfooding are the preferred paths. Use Flatpak here only when you specifically need to test the transitional package.
 
 ### Prerequisites (Ubuntu-like systems)
 
@@ -232,4 +234,4 @@ Current state:
 - Shortcut capture dialog with GNOME keybinding suspend/restore
 - Host-side unit tests cover backend classification, result-kind mapping, IBus parsing, error sanitization, and toggle debounce
 
-The next major milestone is cross-desktop validation and release polish so Direct Typing Mode can be documented with narrower, evidence-backed claims.
+The next major milestone on `deb-first` is native Debian packaging, followed by folding the host runtime back into the main app. Until that work lands, Direct Typing still depends on `saywrite-host`, and the validated path remains GNOME Wayland.
