@@ -95,100 +95,6 @@ where
         .map(|status| status.insertion_capability == crate::host_api::INSERTION_CAPABILITY_TYPING)
         .unwrap_or(false);
 
-    let add_direct_typing_install_controls = |mode_group: &adw::PreferencesGroup, subtitle: &str| {
-        let install_row = adw::ActionRow::builder()
-            .title("Direct Typing")
-            .subtitle(subtitle)
-            .build();
-
-        let install_progress_row = adw::ActionRow::builder()
-            .title("Installing…")
-            .subtitle("Starting")
-            .build();
-        install_progress_row.set_visible(false);
-
-        let install_btn = gtk::Button::with_label("Enable");
-        install_btn.set_valign(Align::Center);
-        install_btn.add_css_class("suggested-action");
-
-        {
-            let install_row = install_row.clone();
-            let install_progress_row = install_progress_row.clone();
-            install_btn.connect_clicked(move |btn| {
-                btn.set_sensitive(false);
-                btn.set_label("Installing…");
-                install_progress_row.set_visible(true);
-                install_progress_row.set_subtitle("Starting…");
-                install_row.set_subtitle("Installation in progress…");
-
-                let rx = crate::host_setup::install_host_companion();
-                let btn = btn.clone();
-                let install_row = install_row.clone();
-                let install_progress_row = install_progress_row.clone();
-                let btn_dc = btn.clone();
-                let install_row_dc = install_row.clone();
-                let install_progress_row_dc = install_progress_row.clone();
-                async_poll::poll_receiver(
-                    rx,
-                    Duration::from_millis(200),
-                    move |result| match result {
-                        Ok(crate::host_setup::HostInstallUpdate::Progress(msg)) => {
-                            install_progress_row.set_subtitle(&msg);
-                            glib::ControlFlow::Continue
-                        }
-                        Ok(crate::host_setup::HostInstallUpdate::Done) => {
-                            if host_integration::host_available() {
-                                btn.set_label("Enabled");
-                                btn.set_sensitive(false);
-                                btn.remove_css_class("suggested-action");
-                                install_row.set_subtitle("Direct Typing is ready. Reopen Settings to confirm.");
-                                install_progress_row.set_title("Done");
-                                install_progress_row.set_subtitle("saywrite-host is running.");
-                            } else {
-                                btn.set_label("Retry");
-                                btn.set_sensitive(true);
-                                btn.add_css_class("suggested-action");
-                                install_row.set_subtitle(
-                                    "Installed, but saywrite-host isn't reachable on the session bus.",
-                                );
-                                install_progress_row.set_title("Daemon unreachable");
-                                let detail = crate::host_setup::host_daemon_journal_tail(8)
-                                    .unwrap_or_else(|| {
-                                        "Run `systemctl --user status saywrite-host` on the host for details.".into()
-                                    });
-                                install_progress_row.set_subtitle(&detail);
-                            }
-                            glib::ControlFlow::Break
-                        }
-                        Err(msg) => {
-                            btn.set_label("Retry");
-                            btn.set_sensitive(true);
-                            btn.add_css_class("suggested-action");
-                            install_row.set_subtitle("Installation failed.");
-                            install_progress_row.set_title("Failed");
-                            install_progress_row.set_subtitle(&msg);
-                            glib::ControlFlow::Break
-                        }
-                    },
-                    move || {
-                        btn_dc.set_label("Retry");
-                        btn_dc.set_sensitive(true);
-                        btn_dc.add_css_class("suggested-action");
-                        install_row_dc.set_subtitle("Installation stopped unexpectedly.");
-                        install_progress_row_dc.set_title("Stopped");
-                        install_progress_row_dc
-                            .set_subtitle("The install process exited without completing.");
-                        glib::ControlFlow::Break
-                    },
-                );
-            });
-        }
-
-        install_row.add_suffix(&install_btn);
-        mode_group.add(&install_row);
-        mode_group.add(&install_progress_row);
-    };
-
     let mode_group = adw::PreferencesGroup::builder()
         .title("Output mode")
         .description("Clipboard Mode copies text to the clipboard. Direct Typing places text directly into the active app when this desktop supports it.")
@@ -235,15 +141,10 @@ where
                 .build();
             mode_group.add(&unavailable_row);
         }
-    } else if crate::host_setup::can_install_in_app() {
-        add_direct_typing_install_controls(
-            &mode_group,
-            "Clipboard Mode is active. Install the host companion to place text directly into apps.",
-        );
     } else {
         let manual_row = adw::ActionRow::builder()
             .title("Direct Typing")
-            .subtitle("Clipboard Mode is active while SayWrite finishes checking whether Direct Typing is available on this desktop.")
+            .subtitle("Clipboard Mode is active while SayWrite finishes starting Direct Typing support.")
             .build();
         mode_group.add(&manual_row);
     }
@@ -662,9 +563,9 @@ where
             },
         ),
         ("Insertion", probe.insertion_label.clone()),
-        ("Host session", host_diag.desktop_label.clone()),
-        ("Host files", host_diag.host_files_label.clone()),
-        ("Host checks", host_diag.dependency_label.clone()),
+        ("Desktop session", host_diag.desktop_label.clone()),
+        ("Runtime", host_diag.host_files_label.clone()),
+        ("Desktop checks", host_diag.dependency_label.clone()),
     ] {
         let row = adw::ActionRow::builder()
             .title(label)

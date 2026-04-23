@@ -73,7 +73,7 @@ fn friendly_error_message(error: &str) -> String {
     if error.contains("unexpected error") {
         return "Something went wrong while handling direct typing.".into();
     }
-    if error.contains("Host integration is not running") || error.contains("host companion") {
+    if error.contains("Host integration is not running") {
         return "Direct typing is not available right now.".into();
     }
     if error.contains("No dictation session is running") {

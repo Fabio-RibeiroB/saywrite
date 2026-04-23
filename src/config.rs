@@ -1,7 +1,6 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
 };
 
 use anyhow::Context;
@@ -71,8 +70,6 @@ pub struct AppSettings {
     #[serde(default)]
     pub onboarding_complete: bool,
     #[serde(default)]
-    pub onboarding_install_id: Option<String>,
-    #[serde(default)]
     pub local_model_path: Option<PathBuf>,
     #[serde(default = "default_cloud_api_base")]
     pub cloud_api_base: String,
@@ -98,7 +95,6 @@ impl Default for AppSettings {
         Self {
             provider_mode: default_provider_mode(),
             onboarding_complete: false,
-            onboarding_install_id: None,
             local_model_path: default_model.exists().then_some(default_model),
             cloud_api_base: default_cloud_api_base(),
             cloud_api_key: String::new(),
@@ -149,20 +145,11 @@ impl AppSettings {
             let _ = parsed.save();
         }
 
-        if parsed.onboarding_complete {
-            let current = current_install_id();
-            if current != parsed.onboarding_install_id {
-                parsed.onboarding_complete = false;
-                parsed.onboarding_install_id = None;
-            }
-        }
-
         parsed
     }
 
     pub fn mark_onboarded(&mut self) {
         self.onboarding_complete = true;
-        self.onboarding_install_id = current_install_id();
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
@@ -179,7 +166,6 @@ impl AppSettings {
         fs::write(&path, payload).with_context(|| format!("failed to write {}", path.display()))?;
         set_private_permissions(&path)
             .with_context(|| format!("failed to lock down {}", path.display()))?;
-        sync_settings_to_host_if_flatpak(self)?;
         Ok(())
     }
 }
@@ -237,73 +223,6 @@ fn default_auto_type() -> bool {
 
 fn default_shortcut() -> String {
     DEFAULT_SHORTCUT.into()
-}
-
-fn sync_settings_to_host_if_flatpak(settings: &AppSettings) -> anyhow::Result<()> {
-    if !inside_flatpak() {
-        return Ok(());
-    }
-
-    let payload = serde_json::to_string_pretty(settings)?;
-    let host_settings = settings_path_for_base(&PathBuf::from("${XDG_CONFIG_HOME:-$HOME/.config}"));
-    let host_dir = host_settings
-        .parent()
-        .expect("settings path always has a parent")
-        .display()
-        .to_string();
-    let host_file = host_settings.display().to_string();
-
-    let mut child = Command::new("flatpak-spawn")
-        .args([
-            "--host",
-            "sh",
-            "-lc",
-            &format!(
-                "CONFIG_HOME=\"${{XDG_CONFIG_HOME:-$HOME/.config}}\"; mkdir -p \"{host_dir}\"; cat > \"{host_file}\"; chmod 700 \"{host_dir}\"; chmod 600 \"{host_file}\"",
-            ),
-        ])
-        .stdin(Stdio::piped())
-        .spawn()
-        .context("failed to start host settings sync")?;
-
-    if let Some(stdin) = child.stdin.as_mut() {
-        use std::io::Write;
-        stdin
-            .write_all(payload.as_bytes())
-            .context("failed to write host settings payload")?;
-    }
-
-    let status = child.wait().context("failed waiting for host settings sync")?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!("host settings sync exited with status {}", status))
-    }
-}
-
-fn settings_path_for_base(base: &Path) -> PathBuf {
-    base.join(APP_DIR_NAME).join(SETTINGS_FILE_NAME)
-}
-
-fn inside_flatpak() -> bool {
-    Path::new("/.flatpak-info").exists()
-}
-
-/// Returns a string that uniquely identifies the current Flatpak install
-/// (the deployed app-commit hash from /.flatpak-info). Returns None outside
-/// of Flatpak, which effectively disables install-based onboarding resets
-/// for dev/source runs.
-fn current_install_id() -> Option<String> {
-    let raw = fs::read_to_string("/.flatpak-info").ok()?;
-    for line in raw.lines() {
-        if let Some(rest) = line.strip_prefix("app-commit=") {
-            let value = rest.trim();
-            if !value.is_empty() {
-                return Some(value.to_string());
-            }
-        }
-    }
-    None
 }
 
 #[cfg(unix)]

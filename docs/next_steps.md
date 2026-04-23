@@ -1,24 +1,22 @@
 # SayWrite Next Steps
 
-SayWrite has crossed the main technical hurdle: hotkey-driven dictation, cleanup, and direct insertion now work on a real GNOME Wayland machine through the host daemon and IBus bridge.
+SayWrite has crossed the main technical hurdle: hotkey-driven dictation, cleanup, and direct insertion now work on a real GNOME Wayland machine through the in-process native runtime and IBus bridge.
 
 The next phase is simplifying distribution and reducing architectural complexity by moving from Flatpak-first to `.deb`-first, targeting Ubuntu/Debian-based distros.
 
 ## Current State
 
 - The GTK app exists with onboarding, main dictation window, settings, diagnostics, and shortcut capture.
-- `saywrite-host` owns the real dictation workflow (D-Bus service, IBus bridge, GlobalShortcuts portal).
+- The app now owns the real dictation workflow on native builds.
 - Global hotkey dictation works through the host path while SayWrite is running.
 - Local (whisper.cpp) transcription works end to end.
 - Cloud transcription works with OpenAI-compatible APIs.
 - Direct insertion works on the currently validated GNOME Wayland setup via IBus bridge.
 - `wtype` (Wayland) and `xdotool` (X11) insertion paths exist but are untested on real hardware.
 - Clipboard and notification fallbacks exist for degraded environments.
-- Host daemon lifecycle is tied to the GUI (starts on app launch, stops and is masked on close).
-- `saywrite-host` refuses to start unless the app owns its D-Bus name, preventing orphan daemons.
+- The app exposes a compatibility D-Bus interface so existing GNOME fallback launchers still work during migration.
 - Shortcut capture dialog temporarily suspends the active GNOME keybinding so all key combos can be captured.
-- Shortcut changes from within Flatpak update GNOME keybindings directly via `flatpak-spawn --host gsettings`.
-- In-app host installation with progress feedback (builds release binary if needed).
+- Shortcut changes update GNOME keybindings directly through native `gsettings` calls.
 - Desktop detection auto-selects the best insertion backend per session (GNOME Wayland, Other Wayland, X11, Other).
 - Insertion capability and result kinds are explicit: `typing`/`clipboard-only`/`notification-only`/`unavailable` and `typed`/`copied`/`notified`/`failed`.
 - Host-side toggle debounce (900ms) prevents repeated shortcut activations from wedging the daemon.
@@ -168,6 +166,14 @@ The key UX goal is that users experience one product, not "app plus helper".
 
 ## Release Priorities
 
+Slices 1-3 on `deb-first` are complete:
+
+- `.deb` packaging is wired up with `cargo-deb`
+- the direct-typing runtime has been pulled into the app
+- Flatpak-specific runtime behavior has been removed from the native path
+
+The next work is cleanup and deletion of migration leftovers, not another transport rewrite.
+
 ## `deb-first` Branch Refactor Map
 
 This branch is the native packaging and architecture migration branch. It stays in the same repo; the goal is to prove the Debian-first path without forking the project or carrying two long-term runtime models.
@@ -286,17 +292,14 @@ To remove once the native path is working:
 - Avoid a second long-lived architecture; native becomes primary, Flatpak is either degraded or removed.
 
 ### v0.4 — `.deb` Packaging
-1. Set up `cargo-deb` for `.deb` builds
-2. Publish a Debian dev package for Ubuntu/Zorin dogfooding
-3. Validate native install on Ubuntu 24.04 or Zorin OS
-4. Make `.deb` the primary internal testing path
+1. Publish a Debian dev package for Ubuntu/Zorin dogfooding
+2. Validate native install on Ubuntu 24.04 or Zorin OS
+3. Make `.deb` the primary internal testing path
 
 ### v0.5 — Merge Host Into App
-1. Move `insertion.rs` and `input.rs` from host daemon into the app
-2. Replace D-Bus IPC with direct function calls
-3. Remove `saywrite-host` binary and systemd service
-4. Simplify `app.rs` (no host lifecycle), `host_integration.rs` (or remove it), `host_setup.rs` (no install flow)
-5. Decide whether Flatpak remains as a degraded package or is removed entirely
+1. Remove `saywrite-host` binary and systemd service from the supported native path
+2. Delete remaining migration-era compatibility code and stale copy
+3. Simplify `host_api.rs`, `host_integration.rs`, and related package assets where they only exist for compatibility
 
 ### v1.0 — Polish and PPA
 1. PPA setup for automatic `apt` updates

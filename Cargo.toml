@@ -35,19 +35,14 @@ extended-description = """\
 SayWrite is a Linux dictation app with a GTK4/libadwaita interface, local or cloud
 transcription, and desktop-aware text delivery.
 .
-The current Debian-first migration keeps the existing split runtime in place:
-the main app provides onboarding, settings, and dictation UI, while
-saywrite-host handles direct typing integration.
+Direct typing is brought up by the app itself on native builds.
 .
 Direct typing is currently validated on GNOME Wayland via IBus. Clipboard Mode
 remains the fallback on unsupported or unvalidated environments."""
 assets = [
     ["target/release/saywrite", "usr/bin/", "755"],
-    ["target/release/saywrite-host", "usr/bin/", "755"],
     ["scripts/run-global-dictation.sh", "usr/bin/saywrite-dictation.sh", "755"],
     ["data/io.github.fabio.SayWrite.desktop", "usr/share/applications/io.github.fabio.SayWrite.desktop", "644"],
     ["data/io.github.fabio.SayWrite.svg", "usr/share/icons/hicolor/scalable/apps/io.github.fabio.SayWrite.svg", "644"],
     ["data/io.github.fabio.SayWrite.appdata.xml", "usr/share/metainfo/io.github.fabio.SayWrite.metainfo.xml", "644"],
-    ["data/saywrite-host.service", "usr/lib/systemd/user/saywrite-host.service", "644"],
-    ["data/io.github.saywrite.Host.service", "usr/share/dbus-1/services/io.github.saywrite.Host.service", "644"],
 ]

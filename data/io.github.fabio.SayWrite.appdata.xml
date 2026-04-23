@@ -19,10 +19,9 @@
       on older hardware.
     </p>
     <p>
-      Direct text insertion is currently validated on GNOME Wayland. The app
-      still uses the separate <code>saywrite-host</code> companion for direct
-      typing, while clipboard delivery remains available when host integration
-      is not active.
+      Direct text insertion is currently validated on GNOME Wayland. Native
+      builds now bring up direct typing in-process, while clipboard delivery
+      remains available when true typing is not active on the current desktop.
     </p>
   </description>
   <launchable type="desktop-id">io.github.fabio.SayWrite.desktop</launchable>
@@ -44,8 +43,8 @@
         <p>Debian-first migration work in progress.</p>
         <ul>
           <li>Native Debian-family packaging is becoming the primary dogfooding target for this branch</li>
-          <li>Flatpak remains a transitional package while the current app-plus-host runtime is still in place</li>
-          <li>Direct Typing still depends on <code>saywrite-host</code>; the validated path remains GNOME Wayland</li>
+          <li>Direct Typing is now brought up by the app itself on native builds instead of depending on a separate companion install</li>
+          <li>The validated direct-typing path remains GNOME Wayland</li>
         </ul>
       </description>
     </release>

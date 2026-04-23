@@ -12,7 +12,7 @@ It should claim:
 
 - supported direct typing on validated setups
 - clear degraded modes on unsupported setups
-- hotkey-first dictation with the host companion installed
+- hotkey-first dictation on supported native builds
 
 ## Support Levels
 
@@ -44,9 +44,9 @@ These setups should not be claimed for release.
 
 Examples:
 
-- no functioning host companion path
+- no functioning direct-typing path
 - no usable insertion backend
-- repeated dictation wedges the host daemon
+- repeated dictation wedges the runtime
 - input method or desktop path is unverified and unreliable
 
 ## Environment Matrix
@@ -78,7 +78,7 @@ Each supported environment should be tested against representative app types.
 
 Run this for every matrix row:
 
-1. Start SayWrite (the app starts `saywrite-host` automatically).
+1. Start SayWrite.
 2. Confirm diagnostics show the expected insertion mode.
 3. Focus a text field in the target app.
 4. Press the hotkey once to start.
@@ -87,7 +87,7 @@ Run this for every matrix row:
 7. Verify the cleaned text lands in the expected place.
 8. Repeat twice in the same field.
 9. Try a quick accidental repeat or held-key scenario.
-10. Confirm the host returns to `idle`.
+10. Confirm the runtime returns to `idle`.
 
 ## Current Test TODO
 
@@ -106,7 +106,7 @@ Run these on the current GNOME Wayland machine and record each row as `Pass`, `D
 - [ ] Repeat dictation twice in the same field
 - [ ] Try a quick accidental repeat press
 - [ ] Try a short held-key scenario and confirm the mic does not wedge
-- [ ] Confirm the host returns to `idle` after each run
+- [ ] Confirm the runtime returns to `idle` after each run
 
 ### Expected Phrase
 
@@ -120,11 +120,7 @@ Expected cleaned result:
 
 ### Log Watch
 
-Keep this running while testing:
-
-```bash
-journalctl --user -u saywrite-host -f
-```
+Keep stderr or terminal logs visible while testing.
 
 Healthy run:
 
@@ -137,8 +133,7 @@ Bad signs:
 - repeated `A dictation session is already running.`
 - stuck microphone indicator
 - insertion result `ok=false`
-- daemon not returning to `idle`
-- `saywrite-host refusing to start: no process owns io.github.fabio.SayWrite`
+- runtime not returning to `idle`
 
 ## Beta Release Gate
 
@@ -147,7 +142,7 @@ Before public beta, these must be true:
 - GNOME Wayland direct insertion passes on at least two real setups
 - X11 direct insertion passes on at least one real setup
 - one degraded fallback path is verified and clearly reported
-- held-key and repeated-toggle bugs do not wedge the daemon
+- held-key and repeated-toggle bugs do not wedge the runtime
 - `cargo test` passes
 - `cargo clippy --all-targets --all-features -- -D warnings` passes
 
