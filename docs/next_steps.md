@@ -168,18 +168,135 @@ The key UX goal is that users experience one product, not "app plus helper".
 
 ## Release Priorities
 
+## `deb-first` Branch Refactor Map
+
+This branch is the native packaging and architecture migration branch. It stays in the same repo; the goal is to prove the Debian-first path without forking the project or carrying two long-term runtime models.
+
+### Target Shape
+
+- Primary distribution: native `.deb` for Ubuntu/Zorin first
+- Primary runtime: single native GTK app process
+- No Flatpak-first assumptions in the main code path
+- No required `saywrite-host` companion for the Debian build
+- Keep direct typing honest: supported where validated, degraded where not
+
+### Refactor Slices
+
+#### Slice 1: Native packaging without changing behavior
+
+Goal: ship a `.deb` quickly so day-to-day dogfooding stops depending on Flatpak.
+
+Files/modules affected:
+
+- [Cargo.toml](/home/fabio/Documents/GitHub/saywrite/Cargo.toml): add `cargo-deb` metadata
+- [README.md](/home/fabio/Documents/GitHub/saywrite/README.md): make `.deb` the primary install path
+- [data/io.github.fabio.SayWrite.appdata.xml](/home/fabio/Documents/GitHub/saywrite/data/io.github.fabio.SayWrite.appdata.xml): release messaging for `.deb`
+- [scripts/install-host.sh](/home/fabio/Documents/GitHub/saywrite/scripts/install-host.sh): keep temporarily for transition only
+
+Deliverable:
+
+- a native `.deb` that installs the current app cleanly on Ubuntu/Zorin
+- Flatpak remains available, but is no longer the default dogfooding path
+
+#### Slice 2: Pull host logic into the app
+
+Goal: remove the artificial app/host boundary from the Debian build.
+
+Source modules to absorb:
+
+- [src/bin/saywrite-host/input.rs](/home/fabio/Documents/GitHub/saywrite/src/bin/saywrite-host/input.rs)
+- [src/bin/saywrite-host/insertion.rs](/home/fabio/Documents/GitHub/saywrite/src/bin/saywrite-host/insertion.rs)
+- [src/bin/saywrite-host/service.rs](/home/fabio/Documents/GitHub/saywrite/src/bin/saywrite-host/service.rs)
+
+Code that becomes transitional or removable:
+
+- [src/host_integration.rs](/home/fabio/Documents/GitHub/saywrite/src/host_integration.rs)
+- [src/host_api.rs](/home/fabio/Documents/GitHub/saywrite/src/host_api.rs)
+- [src/bin/saywrite-host/dbus.rs](/home/fabio/Documents/GitHub/saywrite/src/bin/saywrite-host/dbus.rs)
+- [src/bin/saywrite-host/main.rs](/home/fabio/Documents/GitHub/saywrite/src/bin/saywrite-host/main.rs)
+
+Implementation direction:
+
+- create an in-process integration controller in the main app
+- keep capability/result enums, but stop transporting them over D-Bus
+- replace D-Bus signal subscription with direct event delivery inside the app
+- keep desktop-specific insertion backends; only remove the transport boundary
+
+#### Slice 3: Remove Flatpak-specific runtime behavior
+
+Goal: stop designing the app around the sandbox.
+
+Files/modules affected:
+
+- [src/app.rs](/home/fabio/Documents/GitHub/saywrite/src/app.rs): remove `systemctl` start/stop/mask lifecycle
+- [src/config.rs](/home/fabio/Documents/GitHub/saywrite/src/config.rs): remove Flatpak host settings sync and install-id assumptions
+- [src/host_setup.rs](/home/fabio/Documents/GitHub/saywrite/src/host_setup.rs): remove host install flow, host path probing, and `flatpak-spawn --host`
+- [flatpak/io.github.fabio.SayWrite.json](/home/fabio/Documents/GitHub/saywrite/flatpak/io.github.fabio.SayWrite.json): demote, then remove when the branch lands
+
+What stays:
+
+- desktop/session detection
+- dependency detection and package hints
+- GNOME shortcut self-heal logic, but using native calls only
+
+#### Slice 4: Simplify UI copy and setup flows
+
+Goal: remove product language that only exists because of Flatpak.
+
+Files/modules affected:
+
+- [src/ui/preferences.rs](/home/fabio/Documents/GitHub/saywrite/src/ui/preferences.rs)
+- [src/ui/onboarding.rs](/home/fabio/Documents/GitHub/saywrite/src/ui/onboarding.rs)
+- [src/runtime.rs](/home/fabio/Documents/GitHub/saywrite/src/runtime.rs)
+- [src/ui/main_window/widgets.rs](/home/fabio/Documents/GitHub/saywrite/src/ui/main_window/widgets.rs)
+
+Changes:
+
+- remove "install host companion" actions from Settings
+- replace "host daemon" wording with native direct-typing diagnostics
+- keep Clipboard Mode vs Direct Typing Mode as the user-facing model
+- show backend-specific limitations without mentioning sandbox internals
+
+#### Slice 5: Delete the old architecture
+
+Goal: make the native path the only primary architecture.
+
+To remove once the native path is working:
+
+- `saywrite-host` binary target
+- user systemd service and D-Bus activation files in `data/`
+- host install scripts that only exist for Flatpak
+- `flatpak-spawn --host` code paths
+- Flatpak-first documentation
+
+### Sequence
+
+1. Add `.deb` packaging so dogfooding moves off Flatpak immediately.
+2. Introduce an in-process integration controller and port host logic into it.
+3. Switch UI/runtime code from `host_*` APIs to the native controller.
+4. Remove the app-managed host lifecycle and install flow.
+5. Delete the obsolete daemon, D-Bus, and Flatpak-specific files.
+6. Re-run support-matrix validation on native builds before calling the migration done.
+
+### Guardrails
+
+- Do not promise universal Linux support just because the sandbox is gone.
+- Keep GNOME Wayland as the primary validated path until X11/KDE/wlroots are actually tested.
+- Preserve Clipboard Mode as the safe fallback.
+- Avoid a second long-lived architecture; native becomes primary, Flatpak is either degraded or removed.
+
 ### v0.4 — `.deb` Packaging
 1. Set up `cargo-deb` for `.deb` builds
-2. Publish `.deb` alongside Flatpak on GitHub releases
-3. Validate `.deb` install on Ubuntu 24.04
-4. Use `.deb` for dogfeeding (faster iteration, no stale cache)
+2. Publish a Debian dev package for Ubuntu/Zorin dogfooding
+3. Validate native install on Ubuntu 24.04 or Zorin OS
+4. Make `.deb` the primary internal testing path
 
 ### v0.5 — Merge Host Into App
 1. Move `insertion.rs` and `input.rs` from host daemon into the app
 2. Replace D-Bus IPC with direct function calls
 3. Remove `saywrite-host` binary and systemd service
-4. Simplify `app.rs` (no host lifecycle), `host_integration.rs` (no D-Bus client), `host_setup.rs` (no install flow)
-5. Keep Flatpak as optional for sandbox users
+4. Simplify `app.rs` (no host lifecycle), `host_integration.rs` (or remove it), `host_setup.rs` (no install flow)
+5. Decide whether Flatpak remains as a degraded package or is removed entirely
 
 ### v1.0 — Polish and PPA
 1. PPA setup for automatic `apt` updates
