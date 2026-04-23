@@ -354,7 +354,7 @@ fn shortcut_page(
         (
             "Clipboard Mode",
             "Just press the hotkey to start dictating — no need to hold it. Press it again to stop. Your words are copied to the clipboard — paste them where you need.",
-            Some("Direct Typing inserts your words straight into the focused app — no clipboard or pasting needed. To enable it, open Settings and install the host companion after setup."),
+            Some("Direct Typing inserts your words straight into the focused app — no clipboard or pasting needed. Availability still depends on your desktop and session type."),
         )
     };
 

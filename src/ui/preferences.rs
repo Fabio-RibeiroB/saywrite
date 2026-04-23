@@ -191,7 +191,7 @@ where
 
     let mode_group = adw::PreferencesGroup::builder()
         .title("Output mode")
-        .description("Clipboard Mode copies text to the clipboard. Direct Typing places text directly into the active app after the host companion is installed.")
+        .description("Clipboard Mode copies text to the clipboard. Direct Typing places text directly into the active app when this desktop supports it.")
         .build();
 
     let mode_status_row = adw::ActionRow::builder()
@@ -243,7 +243,7 @@ where
     } else {
         let manual_row = adw::ActionRow::builder()
             .title("Direct Typing")
-            .subtitle("Clipboard Mode is active. Install the host companion package outside the Flatpak to enable Direct Typing.")
+            .subtitle("Clipboard Mode is active while SayWrite finishes checking whether Direct Typing is available on this desktop.")
             .build();
         mode_group.add(&manual_row);
     }

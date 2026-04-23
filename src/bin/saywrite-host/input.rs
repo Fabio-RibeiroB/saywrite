@@ -630,6 +630,7 @@ mod tests {
 
 static PORTAL_ACTIVE: AtomicBool = AtomicBool::new(false);
 const TOGGLE_SHORTCUT_ID: &str = "toggle-dictation";
+static TOGGLE_HANDLER: OnceLock<Arc<dyn Fn() + Send + Sync>> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct HotkeyStatus {
@@ -679,6 +680,11 @@ pub fn probe(settings: &AppSettings) -> HotkeyStatus {
         ),
         setup_hint: custom_shortcut_hint(&shortcut),
     }
+}
+
+#[allow(dead_code)]
+pub fn set_toggle_handler(handler: Arc<dyn Fn() + Send + Sync>) {
+    let _ = TOGGLE_HANDLER.set(handler);
 }
 
 /// Register a global shortcut via the XDG GlobalShortcuts portal and listen
@@ -756,7 +762,11 @@ pub async fn register_and_listen() -> Result<()> {
             }
 
             eprintln!("GlobalShortcuts: activation received, toggling dictation");
-            toggle_dictation_via_dbus(&conn).await;
+            if let Some(handler) = TOGGLE_HANDLER.get() {
+                handler();
+            } else {
+                toggle_dictation_via_dbus(&conn).await;
+            }
         }
     }
 

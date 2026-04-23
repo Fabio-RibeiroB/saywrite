@@ -71,10 +71,10 @@ pub fn present(app: &adw::Application, settings: Rc<RefCell<AppSettings>>) {
 
 fn friendly_error_message(error: &str) -> String {
     if error.contains("unexpected error") {
-        return "Something went wrong while talking to the host companion.".into();
+        return "Something went wrong while handling direct typing.".into();
     }
     if error.contains("Host integration is not running") || error.contains("host companion") {
-        return "The host companion is not available right now.".into();
+        return "Direct typing is not available right now.".into();
     }
     if error.contains("No dictation session is running") {
         return "There is no active dictation to stop.".into();

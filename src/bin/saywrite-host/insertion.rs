@@ -318,8 +318,10 @@ fn notify_transcript(text: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{candidate_backends_for, capability_for_backend, result_kind_for_backend, Backend};
-    use saywrite::host_api;
+    use super::{
+        candidate_backends_for, capability_for_backend, result_kind_for_backend, Backend,
+        host_api,
+    };
 
     #[test]
     fn classifies_typing_backends_honestly() {

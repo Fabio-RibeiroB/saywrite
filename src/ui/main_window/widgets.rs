@@ -549,12 +549,12 @@ pub(super) fn refresh_window_state(ui: &MainWindowUi, settings: &Rc<RefCell<AppS
 
     if host_status.is_none() {
         ui.set_setup_state(
-            "Press your hotkey to start dictation",
+            "Starting direct typing support",
             "Clipboard Mode is active",
-            if host_setup.binary_installed {
-                "The host companion looks installed, but SayWrite cannot reach it yet. Open Settings to reconnect it."
+            if host_setup.host_running {
+                "SayWrite is still starting direct typing support. Open Settings for diagnostics if it does not recover."
             } else {
-                "Open Settings to install the host companion if you want Direct Typing. Clipboard Mode still works with your hotkey."
+                "SayWrite is still bringing up direct typing support. Clipboard Mode still works while it starts."
             },
             SetupAction::OpenSettings,
             true,

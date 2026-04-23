@@ -39,6 +39,9 @@ struct CommandRequirement {
 }
 
 pub fn can_install_in_app() -> bool {
+    if !inside_flatpak() {
+        return false;
+    }
     install_script_path().is_some()
 }
 
@@ -48,6 +51,17 @@ pub enum HostInstallUpdate {
 }
 
 pub fn host_setup_status() -> HostSetupStatus {
+    if !inside_flatpak() {
+        return HostSetupStatus {
+            binary_installed: true,
+            systemd_service_installed: true,
+            dbus_service_installed: true,
+            host_running: host_integration::host_status().is_some(),
+            install_command: "Built into the native app.".into(),
+            gnome_shortcut_command: gnome_shortcut_command(),
+        };
+    }
+
     let binary_path = host_binary_path();
     let systemd_service_path = host_systemd_service_path();
     let dbus_service_path = host_dbus_service_path();
@@ -481,6 +495,10 @@ fn desktop_label(profile: HostProfile) -> String {
 }
 
 fn host_files_label(setup: &HostSetupStatus) -> String {
+    if !inside_flatpak() {
+        return "Direct typing is built into the native app.".into();
+    }
+
     let mut missing = Vec::new();
     if !setup.binary_installed {
         missing.push("binary");
@@ -675,6 +693,20 @@ pub fn host_daemon_journal_tail(lines: u32) -> Option<String> {
 }
 
 pub fn host_install_instructions() -> String {
+    if !inside_flatpak() {
+        let diagnostics = host_diagnostics();
+        let mut steps = vec![
+            "Direct Typing is built into the native app.".to_string(),
+            String::new(),
+            format!("Desktop session: {}", diagnostics.desktop_label),
+            format!("Desktop checks: {}", diagnostics.dependency_label),
+        ];
+        if let Some(hint) = diagnostics.package_hint {
+            steps.push(hint);
+        }
+        return steps.join("\n");
+    }
+
     let setup = host_setup_status();
     let diagnostics = host_diagnostics();
     let mut steps = vec![
@@ -725,6 +757,10 @@ fn host_dbus_service_path() -> PathBuf {
 }
 
 fn host_install_command() -> String {
+    if !inside_flatpak() {
+        return "Built into the native app.".into();
+    }
+
     if bundled_asset_root().is_some() {
         return "Press Install in Settings.".into();
     }
@@ -834,6 +870,11 @@ fn gnome_shortcuts_supported() -> bool {
 }
 
 fn restart_host_service() {
+    if !inside_flatpak() {
+        host_integration::restart_shortcut_listener();
+        return;
+    }
+
     let _ = if Path::new("/.flatpak-info").exists() {
         Command::new("flatpak-spawn")
             .args([

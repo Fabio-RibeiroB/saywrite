@@ -37,12 +37,12 @@ pub fn probe_runtime(settings: &AppSettings) -> RuntimeProbe {
                 crate::host_api::insertion_capability_label(&status.insertion_capability),
                 status.insertion_backend
             ),
-            None => "Clipboard fallback until host integration is running".into(),
+            None => "Clipboard fallback until direct typing is ready".into(),
         },
         dictation_label: match host_integration::host_status() {
-            Some(status) if status.hotkey_active => "Host daemon ready for hotkey dictation".into(),
-            Some(_) => "Host daemon running, but the global shortcut is not active yet".into(),
-            None => "Install host companion for global hotkey dictation".into(),
+            Some(status) if status.hotkey_active => "Global shortcut ready for dictation".into(),
+            Some(_) => "Direct typing is available, but the global shortcut is not active yet".into(),
+            None => "Direct typing is still starting up".into(),
         },
         provider_label,
     }
