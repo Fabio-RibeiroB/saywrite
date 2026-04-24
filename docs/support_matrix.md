@@ -194,6 +194,21 @@ Native package smoke validation on April 24, 2026:
 - [x] Confirmed `io.github.saywrite.Host` is owned by `/usr/bin/saywrite`
 - [x] Confirmed diagnostics report `hotkey_active=true`, Direct Typing `typing`, and IBus backend on the current GNOME Wayland session
 
+Package smoke refresh on April 24, 2026 at 22:48 BST:
+
+- Environment: Zorin OS 18.1 (`ID=zorin`, `ID_LIKE="ubuntu debian"`), `XDG_CURRENT_DESKTOP=zorin:GNOME`, `XDG_SESSION_TYPE=wayland`
+- Dependency probes: `ibus=/usr/bin/ibus`, `wtype=/usr/bin/wtype`, `xdotool` missing as expected for the current GNOME Wayland row
+- Checks passed: `cargo fmt --check`, `cargo check`, `cargo test`, `cargo deb`
+- Reinstalled package: `target/debian/saywrite_0.3.5-1_amd64.deb`
+- Package content check: no `saywrite-host`, `io.github.saywrite.Host.service`, or `systemd/user` files
+- Runtime ownership: `/usr/bin/saywrite` owns `io.github.saywrite.Host`
+- Runtime status: `typing`, backend `ibus-engine`, hotkey active
+- GNOME shortcut fallback: `Super+Alt+D` runs `/usr/bin/saywrite-dictation.sh`
+- Manual focused-input result: Direct Typing delivered text into the active chat/input field
+- Spoken phrase result observed: `Hello from Say Write?` followed by additional dictated text
+- Follow-up cleanup note: direct insertion passed, but the brand phrase can still transcribe as `Say Write` instead of `SayWrite`
+- Remaining manual work for this row: complete repeatability checks and test browser, GTK, Qt, and Electron app targets
+
 Run these on the current GNOME Wayland machine and record each row as `Pass`, `Degraded`, `Fail`, or `Untested`.
 
 ### App Checklist
@@ -202,7 +217,7 @@ Run these on the current GNOME Wayland machine and record each row as `Pass`, `D
 - [ ] GTK app: Text Editor
 - [ ] Qt app: Kate or another Qt text editor
 - [ ] Electron app: VS Code, Discord, or Slack
-- [ ] Terminal/chat input: Codex or another terminal-based prompt/chat tool
+- [x] Terminal/chat input: Codex or another terminal-based prompt/chat tool
 
 ### Repeatability Checklist
 
