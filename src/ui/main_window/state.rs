@@ -226,8 +226,7 @@ impl MainWindowUi {
         self.spinner.stop();
         self.waveform.set_active(false);
         self.activity_revealer.set_reveal_child(false);
-        self.state_label
-            .set_label("Host daemon unavailable");
+        self.state_label.set_label("Direct Typing unavailable");
         self.dictate_btn.remove_css_class("destructive-action");
         self.dictate_btn.add_css_class("suggested-action");
         self.dictate_btn.set_label("  Press Hotkey or Click to Start  ");

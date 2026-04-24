@@ -53,6 +53,7 @@ fn load_css() {
 }
 
 fn start_native_integration() {
+    host_setup::cleanup_legacy_host_companion();
     host_integration::start_background_integration();
     thread::spawn(|| {
         let label = AppSettings::load().global_shortcut_label;

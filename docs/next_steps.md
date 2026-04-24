@@ -23,6 +23,9 @@ The current phase is finishing the native Debian path, removing leftover Flatpak
 - Error sanitization maps typed `DictationError` variants to user-friendly messages.
 - Integration tests cover backend classification, result-kind mapping, IBus parsing, error sanitization, and toggle debounce.
 - The old `docs/architecture.md`, `docs/holistic_review.md`, `docs/implementation_plan.md`, and `docs/ship_todo.md` files have been removed because they no longer reflect the current branch state.
+- The standalone `saywrite-host` binary target, user systemd service, D-Bus activation file, and host installer script have been removed from the native path.
+- Native package smoke validation on April 24, 2026 confirmed that `/usr/bin/saywrite` owns `io.github.saywrite.Host`, reports Direct Typing as `typing` via the IBus backend, and treats the GNOME fallback shortcut as an active hotkey path.
+- Startup migration now removes stale user-local `saywrite-host` artifacts left by older Flatpak-era installs: the user systemd service, D-Bus activation file, and `~/.local/bin/saywrite-host`.
 
 ## Migration: Flatpak → `.deb`-First
 
@@ -92,7 +95,7 @@ The goal: any Ubuntu/Debian user should get working dictation with minimal frict
 ### Global Shortcut
 
 Currently the global hotkey relies on:
-1. XDG GlobalShortcuts portal (registered by `saywrite-host` at startup)
+1. XDG GlobalShortcuts portal (registered by the app at startup)
 2. GNOME custom keybindings via `gsettings`
 
 **After migration:**
@@ -136,11 +139,12 @@ The key UX goal is that users experience one product, not "app plus helper".
 - Native `.deb` packaging is wired up with `cargo-deb`
 - The installed package matches the current in-process runtime
 - Support docs now point at the native release path instead of Flatpak-first setup
+- Rebuilt and reinstalled `target/debian/saywrite_0.3.5-1_amd64.deb` on April 24, 2026; package contents contain `saywrite`, `saywrite-dictation.sh`, desktop metadata, icon, metainfo, and no `saywrite-host` service assets
 
 ### Harden the IBus Path ✅
 - Fixed race condition, added retry logic, comprehensive logging
 - Engine swap/restore with 120ms delay and retry on failure
-- Repeated dictation reliable without daemon restart
+- Repeated dictation reliable without restarting the app
 
 ### Capability Reporting ✅
 - Runtime probing complete: GPU detection, whisper.cpp discovery, local model check
@@ -157,16 +161,18 @@ The key UX goal is that users experience one product, not "app plus helper".
 - WaveformBox, Revealers, inline setup actions, insertion chip
 - Shortcut capture with GNOME keybinding suspend/restore
 - Onboarding shortcut page with explicit Change button
-- Settings sync from Flatpak to host via `flatpak-spawn --host`
 
 ### Desktop Detection ✅
 - `host_setup.rs` detects GNOME Wayland, Other Wayland, X11, Other
 - Per-profile dependency checks with Ubuntu/Zorin package hints
 - Diagnostics show desktop label, host files status, and dependency status
+- GNOME fallback shortcut detection is counted as an active hotkey path when the XDG GlobalShortcuts portal is unavailable
 
 ### Remove Flatpak Assumptions ✅
 - Flatpak-specific runtime behaviour has been removed from the native path
 - The old Flatpak manifest and migration-era planning docs have been deleted
+- The `saywrite-host` binary target, user service activation files, and host installer script have been deleted
+- Native startup cleans stale user-local host companion files from previous installs so the app can own the compatibility D-Bus name
 
 ### Tauri Note
 
@@ -179,8 +185,9 @@ Slices 1-3 on `deb-first` are complete:
 - `.deb` packaging is wired up with `cargo-deb`
 - the direct-typing runtime has been pulled into the app
 - Flatpak-specific runtime behavior has been removed from the native path
+- the installed package has been validated after removing the old daemon target
 
-The next work is cleanup and deletion of migration leftovers, not another transport rewrite.
+The next work is simplifying the remaining compatibility naming and stale copy around `host_api.rs` and `host_integration.rs`, not another transport rewrite.
 
 ## `deb-first` Branch Refactor Map
 
@@ -205,7 +212,7 @@ Files/modules affected:
 - [Cargo.toml](/home/fabio/Documents/GitHub/saywrite/Cargo.toml): add `cargo-deb` metadata
 - [README.md](/home/fabio/Documents/GitHub/saywrite/README.md): make `.deb` the primary install path
 - [data/io.github.fabio.SayWrite.appdata.xml](/home/fabio/Documents/GitHub/saywrite/data/io.github.fabio.SayWrite.appdata.xml): release messaging for `.deb`
-- [scripts/install-host.sh](/home/fabio/Documents/GitHub/saywrite/scripts/install-host.sh): keep temporarily for transition only
+- host installer script: deleted after the native app took ownership of direct typing
 
 Deliverable:
 
@@ -216,24 +223,27 @@ Deliverable:
 
 Goal: remove the artificial app/host boundary from the Debian build.
 
-Source modules to absorb:
+Source modules absorbed:
 
-- [src/bin/saywrite-host/input.rs](/home/fabio/Documents/GitHub/saywrite/src/bin/saywrite-host/input.rs)
-- [src/bin/saywrite-host/insertion.rs](/home/fabio/Documents/GitHub/saywrite/src/bin/saywrite-host/insertion.rs)
-- [src/bin/saywrite-host/service.rs](/home/fabio/Documents/GitHub/saywrite/src/bin/saywrite-host/service.rs)
+- [src/input.rs](/home/fabio/Documents/GitHub/saywrite/src/input.rs)
+- [src/insertion.rs](/home/fabio/Documents/GitHub/saywrite/src/insertion.rs)
+- [src/service.rs](/home/fabio/Documents/GitHub/saywrite/src/service.rs)
 
-Code that becomes transitional or removable:
+Deleted standalone daemon code:
 
-- [src/host_integration.rs](/home/fabio/Documents/GitHub/saywrite/src/host_integration.rs)
-- [src/host_api.rs](/home/fabio/Documents/GitHub/saywrite/src/host_api.rs)
-- [src/bin/saywrite-host/dbus.rs](/home/fabio/Documents/GitHub/saywrite/src/bin/saywrite-host/dbus.rs)
-- [src/bin/saywrite-host/main.rs](/home/fabio/Documents/GitHub/saywrite/src/bin/saywrite-host/main.rs)
+- `src/bin/saywrite-host/dbus.rs`
+- `src/bin/saywrite-host/main.rs`
+
+Compatibility code still present:
+
+- [src/host_integration.rs](/home/fabio/Documents/GitHub/saywrite/src/host_integration.rs): in-process direct-typing integration and compatibility D-Bus surface
+- [src/host_api.rs](/home/fabio/Documents/GitHub/saywrite/src/host_api.rs): shared compatibility constants and status/result names
 
 Implementation direction:
 
 - create an in-process integration controller in the main app
-- keep capability/result enums, but stop transporting them over D-Bus
-- replace D-Bus signal subscription with direct event delivery inside the app
+- keep capability/result enums for diagnostics and the temporary compatibility interface
+- replace app-internal D-Bus signal subscription with direct event delivery
 - keep desktop-specific insertion backends; only remove the transport boundary
 
 #### Slice 3: Remove Flatpak-specific runtime behavior
@@ -246,6 +256,7 @@ Files/modules affected:
 - [src/config.rs](/home/fabio/Documents/GitHub/saywrite/src/config.rs): remove Flatpak host settings sync and install-id assumptions
 - [src/host_setup.rs](/home/fabio/Documents/GitHub/saywrite/src/host_setup.rs): remove host install flow, host path probing, and `flatpak-spawn --host`
 - [flatpak/io.github.fabio.SayWrite.json](/home/fabio/Documents/GitHub/saywrite/flatpak/io.github.fabio.SayWrite.json): demote, then remove when the branch lands
+- legacy user-local host cleanup: implemented at startup for old `saywrite-host` user service, D-Bus activation file, and `~/.local/bin/saywrite-host`
 
 What stays:
 
@@ -275,12 +286,15 @@ Changes:
 
 Goal: make the native path the only primary architecture.
 
-To remove once the native path is working:
+Removed from the native path:
 
 - `saywrite-host` binary target
 - user systemd service and D-Bus activation files in `data/`
 - host install scripts that only exist for Flatpak
 - `flatpak-spawn --host` code paths
+
+Still to audit:
+
 - Flatpak-first documentation
 
 ### Sequence
@@ -300,12 +314,12 @@ To remove once the native path is working:
 - Avoid a second long-lived architecture; native becomes primary, Flatpak is either degraded or removed.
 
 ### v0.4 — `.deb` Packaging
-1. Publish a Debian dev package for Ubuntu/Zorin dogfooding
-2. Validate native install on Ubuntu 24.04 or Zorin OS
-3. Make `.deb` the primary internal testing path
+1. Publish a Debian dev package for Ubuntu/Zorin dogfooding ✅
+2. Validate native install on Ubuntu 24.04 or Zorin OS ✅
+3. Make `.deb` the primary internal testing path ✅
 
 ### v0.5 — Merge Host Into App
-1. Remove `saywrite-host` binary and systemd service from the supported native path
+1. Remove `saywrite-host` binary and systemd service from the supported native path ✅
 2. Delete remaining migration-era compatibility code and stale copy
 3. Simplify `host_api.rs`, `host_integration.rs`, and related package assets where they only exist for compatibility
 

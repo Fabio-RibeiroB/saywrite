@@ -44,6 +44,8 @@
         <ul>
           <li>Native Debian-family packaging is becoming the primary dogfooding target for this branch</li>
           <li>Direct Typing is now brought up by the app itself on native builds instead of depending on a separate companion install</li>
+          <li>The old standalone host daemon target and user service activation files have been removed from the native path</li>
+          <li>Native startup now removes stale user-local host companion files left by previous installs so the app can own dictation integration directly</li>
           <li>The validated direct-typing path remains GNOME Wayland</li>
         </ul>
       </description>

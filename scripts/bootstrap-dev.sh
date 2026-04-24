@@ -27,7 +27,7 @@ PACKAGES=(
 echo "SayWrite development bootstrap"
 echo
 echo "This installs host packages needed for local development only."
-echo "End users should not need these manually once the Flatpak bundles everything."
+echo "End users should get these through the native package dependencies."
 echo
 echo "Packages:"
 printf '  - %s\n' "${PACKAGES[@]}"
@@ -38,4 +38,4 @@ sudo apt-get install -y "${PACKAGES[@]}"
 
 echo
 echo "Development dependencies installed."
-echo "Next step: tell Codex to continue wiring the real local backend."
+echo "Next step: run cargo check or build the native package."

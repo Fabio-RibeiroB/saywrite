@@ -25,7 +25,7 @@ Requirements:
 - hotkey starts dictation
 - hotkey stops dictation
 - cleaned text lands in the focused field directly
-- repeated dictation works without restarting the daemon
+- repeated dictation works without restarting the app
 - diagnostics report the active backend honestly
 
 ### Degraded
@@ -90,6 +90,14 @@ Run this for every matrix row:
 10. Confirm the runtime returns to `idle`.
 
 ## Current Test TODO
+
+Native package smoke validation on April 24, 2026:
+
+- [x] Rebuilt and reinstalled `target/debian/saywrite_0.3.5-1_amd64.deb`
+- [x] Confirmed installed package does not contain `saywrite-host`, user systemd service, or D-Bus activation assets
+- [x] Confirmed startup removes stale user-local `saywrite-host` files from previous installs
+- [x] Confirmed `io.github.saywrite.Host` is owned by `/usr/bin/saywrite`
+- [x] Confirmed diagnostics report `hotkey_active=true`, Direct Typing `typing`, and IBus backend on the current GNOME Wayland session
 
 Run these on the current GNOME Wayland machine and record each row as `Pass`, `Degraded`, `Fail`, or `Untested`.
 

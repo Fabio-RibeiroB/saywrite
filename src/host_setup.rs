@@ -1,8 +1,4 @@
-use std::{
-    env,
-    path::PathBuf,
-    process::Command,
-};
+use std::{env, fs, path::PathBuf, process::Command};
 
 use crate::host_integration;
 
@@ -48,6 +44,41 @@ pub fn host_diagnostics() -> HostDiagnostics {
         host_files_label: "Direct typing is built into the native app.".into(),
         dependency_label: dependency_label(profile, &missing),
         package_hint: dependency_package_hint(&missing),
+    }
+}
+
+pub fn cleanup_legacy_host_companion() {
+    let mut changed = false;
+
+    for args in [
+        &["systemctl", "--user", "stop", "saywrite-host.service"][..],
+        &["systemctl", "--user", "disable", "saywrite-host.service"][..],
+    ] {
+        let _ = run_local(args);
+    }
+
+    for path in legacy_host_paths() {
+        if path.exists() {
+            match fs::remove_file(&path) {
+                Ok(()) => {
+                    changed = true;
+                    eprintln!(
+                        "SayWrite: removed legacy host companion file {}",
+                        path.display()
+                    );
+                }
+                Err(err) => {
+                    eprintln!(
+                        "SayWrite: could not remove legacy host companion file {}: {err}",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
+
+    if changed {
+        let _ = run_local(&["systemctl", "--user", "daemon-reload"]);
     }
 }
 
@@ -189,7 +220,10 @@ fn set_gnome_keybinding_field(field: &str, value: &str) -> Result<(), String> {
 fn get_gnome_keybinding_field(field: &str) -> Result<String, String> {
     let args = ["gsettings", "get", HANDS_FREE_SCHEMA_KEY, field];
     let out = capture_local(&args)?;
-    Ok(String::from_utf8_lossy(&out).trim().trim_matches('\'').to_string())
+    Ok(String::from_utf8_lossy(&out)
+        .trim()
+        .trim_matches('\'')
+        .to_string())
 }
 
 fn run_local(args: &[&str]) -> Result<(), String> {
@@ -231,6 +265,28 @@ fn hands_free_command_path() -> Option<String> {
     } else {
         None
     }
+}
+
+fn legacy_host_paths() -> Vec<PathBuf> {
+    let home = dirs::home_dir();
+    let config_home = env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home.as_ref().map(|path| path.join(".config")));
+    let data_home = env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| home.as_ref().map(|path| path.join(".local/share")));
+
+    let mut paths = Vec::new();
+    if let Some(config_home) = config_home {
+        paths.push(config_home.join("systemd/user/saywrite-host.service"));
+    }
+    if let Some(data_home) = data_home {
+        paths.push(data_home.join("dbus-1/services/io.github.saywrite.Host.service"));
+    }
+    if let Some(home) = home {
+        paths.push(home.join(".local/bin/saywrite-host"));
+    }
+    paths
 }
 
 fn find_repo_root_for_dev() -> Option<PathBuf> {

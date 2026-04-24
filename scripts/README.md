@@ -1,6 +1,6 @@
 # Scripts Guide
 
-These scripts support local development, host setup, and a few fallback flows. The current supported architecture is the Rust GTK app plus the Rust `saywrite-host` daemon.
+These scripts support local development and fallback desktop integration flows. The current supported architecture is the single native Rust GTK app.
 
 ## Current Development Scripts
 
@@ -36,14 +36,7 @@ Optional explicit modes:
 ./scripts/download-local-model.sh
 ```
 
-## Host Setup Scripts
-
-`install-host.sh` installs the Rust `saywrite-host` companion into the user environment and registers the user service and D-Bus activation entry. It also installs `whisper-cli` to `~/.local/bin/` for the host daemon to use.
-
-```bash
-cargo build --release
-./scripts/install-host.sh
-```
+## Shortcut Fallback Scripts
 
 `install-gnome-shortcut.sh` installs a GNOME custom shortcut fallback that calls the host D-Bus toggle command. Use this if the XDG GlobalShortcuts portal does not work on your desktop.
 
@@ -51,7 +44,7 @@ cargo build --release
 ./scripts/install-gnome-shortcut.sh
 ```
 
-`run-global-dictation.sh` is the debounced helper command used by the GNOME shortcut fallback. It calls `ToggleDictation` on the host D-Bus interface with a guard against rapid repeated invocations.
+`run-global-dictation.sh` is the debounced helper command used by the GNOME shortcut fallback. It calls `ToggleDictation` on SayWrite's compatibility D-Bus interface with a guard against rapid repeated invocations.
 
 ```bash
 ./scripts/run-global-dictation.sh

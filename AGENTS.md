@@ -30,7 +30,7 @@ It should look and feel beautiful. If someone gets stuck setting it up or using 
 | `src/model_installer.rs`            | model download, validation, and cache flow                                              |
 | `src/host_integration.rs`           | in-process direct-typing integration + compatibility D-Bus interface                    |
 | `src/host_api.rs`                   | shared D-Bus constants, host status types, capability/result enums                      |
-| `src/host_setup.rs`                 | desktop detection, diagnostics, GNOME shortcut helpers                                  |
+| `src/host_setup.rs`                 | desktop detection, diagnostics, legacy host cleanup, GNOME shortcut helpers             |
 | `src/input.rs`                      | shared hotkey + IBus integration                                                        |
 | `src/insertion.rs`                  | shared desktop insertion backends                                                       |
 | `src/service.rs`                    | shared dictation/insertion controller                                                   |
@@ -40,7 +40,6 @@ It should look and feel beautiful. If someone gets stuck setting it up or using 
 | `src/ui/onboarding.rs`              | onboarding carousel                                                                     |
 | `src/ui/preferences.rs`             | preferences and diagnostics                                                             |
 | `src/ui/shortcut_capture.rs`        | keyboard shortcut capture dialog                                                        |
-| `src/bin/saywrite-host/`            | historical standalone daemon target kept during migration                               |
 | `scripts/install-gnome-shortcut.sh` | GNOME custom shortcut fallback installer                                                |
 
 ## User-Facing Modes

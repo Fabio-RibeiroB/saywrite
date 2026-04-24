@@ -147,7 +147,6 @@ This binds `Super+Alt+D` to trigger dictation through the app's compatibility D-
 
 ```
 src/                        Rust app source
-  bin/saywrite-host/        Historical standalone daemon target kept during migration
   input.rs                  Shared hotkey + IBus integration
   insertion.rs              Shared desktop insertion backends
   service.rs                Shared dictation/insertion controller
@@ -162,7 +161,7 @@ src/                        Rust app source
   dictation.rs              Mic capture, whisper transcription, cloud handoff
   host_api.rs               D-Bus constants and host status types
   host_integration.rs       In-process direct-typing integration + compatibility D-Bus interface
-  host_setup.rs             Desktop detection, diagnostics, and GNOME shortcut helpers
+  host_setup.rs             Desktop detection, diagnostics, legacy host cleanup, and GNOME shortcut helpers
   model_installer.rs        Model download and cache management
   runtime.rs                Capability probing (GPU, whisper, insertion)
 data/                       Desktop metadata and icons
@@ -187,13 +186,13 @@ Current state:
 - GTK app with onboarding, main dictation window, settings, and diagnostics
 - The app owns the real dictation workflow, shortcut handling, and insertion orchestration on native builds
 - The app exposes a compatibility D-Bus interface so existing GNOME fallback launchers continue to work during migration
-- Global hotkey dictation works through the host path while SayWrite is running
+- Global hotkey dictation works through the native app while SayWrite is running
 - Local (whisper.cpp) and cloud (OpenAI-compatible API) transcription both work end-to-end
 - Direct insertion works on the validated GNOME Wayland setup via IBus bridge
 - `wtype` (Wayland) and `xdotool` (X11) insertion paths exist but are untested on real hardware
 - Clipboard and notification fallbacks work on other environments
 - Desktop detection auto-selects the best insertion backend per session
 - Shortcut capture dialog with GNOME keybinding suspend/restore
-- Host-side unit tests cover backend classification, result-kind mapping, IBus parsing, error sanitization, and toggle debounce
+- Unit tests cover backend classification, result-kind mapping, IBus parsing, error sanitization, and toggle debounce
 
-The next major milestone on `deb-first` is cleanup: remove the obsolete standalone daemon packaging leftovers and finish simplifying the remaining migration-era copy and files. The validated direct-typing path remains GNOME Wayland.
+The next major milestone on `deb-first` is cleanup: finish simplifying the remaining migration-era naming and compatibility copy around the temporary D-Bus surface. The validated direct-typing path remains GNOME Wayland.
