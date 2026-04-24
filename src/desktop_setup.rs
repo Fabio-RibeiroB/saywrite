@@ -403,9 +403,7 @@ fn dependency_label(profile: DesktopProfile, missing: &[CommandRequirement]) -> 
             DesktopProfile::GnomeWayland => {
                 "GNOME Wayland checks look ready for Direct Typing.".into()
             }
-            DesktopProfile::OtherWayland => {
-                "Wayland checks look ready for the current fallback path.".into()
-            }
+            DesktopProfile::OtherWayland => "Wayland checks look ready for Direct Typing.".into(),
             DesktopProfile::X11 => "X11 checks look ready for Direct Typing.".into(),
             DesktopProfile::Other => {
                 "No desktop-specific checks are defined for this session.".into()
@@ -456,7 +454,7 @@ fn dependency_package_hint(missing: &[CommandRequirement]) -> Option<String> {
         None
     } else {
         Some(format!(
-            "Ubuntu/Zorin packages: sudo apt install {}",
+            "Debian/Ubuntu/Zorin packages: sudo apt install {}",
             packages.join(" ")
         ))
     }
@@ -493,4 +491,30 @@ fn gnome_shortcuts_supported() -> bool {
     env::var("XDG_CURRENT_DESKTOP")
         .map(|value| value.to_ascii_lowercase().contains("gnome"))
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{dependency_label, CommandRequirement, DesktopProfile};
+
+    #[test]
+    fn other_wayland_ready_message_names_direct_typing() {
+        assert_eq!(
+            dependency_label(DesktopProfile::OtherWayland, &[]),
+            "Wayland checks look ready for Direct Typing."
+        );
+    }
+
+    #[test]
+    fn missing_x11_dependency_message_is_session_specific() {
+        let missing = [CommandRequirement {
+            command: "xdotool",
+            package_hint: Some("xdotool"),
+        }];
+
+        assert_eq!(
+            dependency_label(DesktopProfile::X11, &missing),
+            "Missing X11 tools: xdotool."
+        );
+    }
 }

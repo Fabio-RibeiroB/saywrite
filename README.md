@@ -39,6 +39,7 @@ You can replay onboarding from Settings at any time if you want to re-check micr
 |---|---|---|
 | GNOME Wayland + IBus | Supported | Supported |
 | X11 + xdotool | Untested | Supported |
+| KDE Plasma Wayland + wtype | Untested | Supported |
 | wlroots Wayland + wtype | Untested | Supported |
 | Other Wayland compositors | Not available | Supported |
 
@@ -176,7 +177,7 @@ See [docs/README.md](docs/README.md) for the documentation index, including whic
 
 Key docs:
 - [docs/next_steps.md](docs/next_steps.md) — active product and engineering priorities
-- [docs/support_matrix.md](docs/support_matrix.md) — release validation and supported environments
+- [docs/support_matrix.md](docs/support_matrix.md) — native package validation runbook and supported environments
 
 ## Current Implementation Status
 
@@ -195,4 +196,4 @@ Current state:
 - Shortcut capture dialog with GNOME keybinding suspend/restore
 - Unit tests cover backend classification, result-kind mapping, IBus parsing, error sanitization, and toggle debounce
 
-The next major milestone on `deb-first` is validation: broaden the native package smoke matrix beyond the current GNOME Wayland machine. The validated direct-typing path remains GNOME Wayland.
+The next major milestone on `deb-first` is cross-desktop native validation: use the support matrix runbook to test the installed package on X11, KDE or wlroots Wayland, and one degraded fallback session. The validated direct-typing path remains GNOME Wayland until those rows pass.

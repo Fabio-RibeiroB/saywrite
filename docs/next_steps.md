@@ -2,7 +2,7 @@
 
 SayWrite has crossed the main technical hurdle: hotkey-driven dictation, cleanup, and direct insertion now work on a real GNOME Wayland machine through the in-process native runtime and IBus bridge.
 
-The current phase is validating the native Debian path across more desktop sessions and keeping the documentation aligned with the supported runtime.
+The current phase is **cross-desktop native validation**: prove the packaged app on X11, non-GNOME Wayland, and degraded fallback sessions before broadening release claims.
 
 ## Current State
 
@@ -27,6 +27,7 @@ The current phase is validating the native Debian path across more desktop sessi
 - The primary runtime modules now use native integration naming: `native_integration.rs`, `integration_api.rs`, and `desktop_setup.rs`.
 - Native package smoke validation on April 24, 2026 confirmed that `/usr/bin/saywrite` owns `io.github.saywrite.Host`, reports Direct Typing as `typing` via the IBus backend, and treats the GNOME fallback shortcut as an active hotkey path.
 - Startup migration now removes stale user-local `saywrite-host` artifacts left by older Flatpak-era installs: the user systemd service, D-Bus activation file, and `~/.local/bin/saywrite-host`.
+- `docs/support_matrix.md` now contains the native validation runbook for moving X11, KDE/wlroots Wayland, and degraded fallback rows out of `Untested`.
 
 ## Migration: Flatpak → `.deb`-First
 
@@ -196,7 +197,14 @@ Slices 1-3 plus the v0.5 native naming cleanup on `deb-first` are complete:
 - the installed package has been validated after removing the old daemon target
 - remaining host-era module names and UI/runtime API names have been simplified around the native in-process controller
 
-The next work is native validation outside the current GNOME Wayland machine: X11 with `xdotool`, non-GNOME Wayland with `wtype`, and any remaining setup copy that should become desktop-specific.
+The next work is native validation outside the current GNOME Wayland machine. Follow `docs/support_matrix.md` and validate in this order:
+
+1. X11 with `xdotool`
+2. KDE Plasma Wayland with `wtype` and the XDG GlobalShortcuts portal
+3. wlroots Wayland with `wtype`
+4. an intentionally degraded Wayland session where Clipboard Mode is the clear fallback
+
+While testing, audit onboarding, Settings, diagnostics, and setup copy so GNOME-specific guidance only appears on GNOME sessions.
 
 ## `deb-first` Branch Refactor Map
 
@@ -332,13 +340,19 @@ Still to audit:
 2. Delete migration-era stale copy from the active native path ✅
 3. Simplify `integration_api.rs`, `native_integration.rs`, and related package assets while keeping the temporary compatibility D-Bus surface ✅
 
+### v0.6 — Cross-Desktop Native Validation
+1. Validate X11 Direct Typing with the installed `.deb`
+2. Validate KDE Plasma Wayland Direct Typing and shortcut behavior with the installed `.deb`
+3. Validate one wlroots Wayland session with the installed `.deb`
+4. Verify one degraded fallback path where Clipboard Mode is clearly reported
+5. Update README support claims only for rows that pass the support matrix
+
 ### v1.0 — Polish and PPA
 1. PPA setup for automatic `apt` updates
 2. Tray icon and quick controls
 3. Custom vocabulary and context hints
 4. Move UI away from substring error matching toward typed error handling
 5. Consolidate async state model (timer polling → event-driven)
-6. Cross-desktop validation on non-GNOME setups
 
 ### Doc Hygiene
 
