@@ -10,7 +10,7 @@ These scripts support local development and fallback desktop integration flows. 
 ./scripts/bootstrap-rust-dev.sh
 ```
 
-`bootstrap-dev.sh` installs host-side development dependencies on Ubuntu-like systems.
+`bootstrap-dev.sh` installs desktop integration and audio development dependencies on Ubuntu-like systems.
 
 ```bash
 ./scripts/bootstrap-dev.sh
@@ -38,7 +38,7 @@ Optional explicit modes:
 
 ## Shortcut Fallback Scripts
 
-`install-gnome-shortcut.sh` installs a GNOME custom shortcut fallback that calls the host D-Bus toggle command. Use this if the XDG GlobalShortcuts portal does not work on your desktop.
+`install-gnome-shortcut.sh` installs a GNOME custom shortcut fallback that calls SayWrite's compatibility D-Bus toggle command. Use this if the XDG GlobalShortcuts portal does not work on your desktop.
 
 ```bash
 ./scripts/install-gnome-shortcut.sh

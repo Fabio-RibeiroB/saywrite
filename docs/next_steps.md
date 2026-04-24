@@ -2,7 +2,7 @@
 
 SayWrite has crossed the main technical hurdle: hotkey-driven dictation, cleanup, and direct insertion now work on a real GNOME Wayland machine through the in-process native runtime and IBus bridge.
 
-The current phase is finishing the native Debian path, removing leftover Flatpak-era assumptions, and keeping the documentation aligned with the supported runtime.
+The current phase is validating the native Debian path across more desktop sessions and keeping the documentation aligned with the supported runtime.
 
 ## Current State
 
@@ -24,6 +24,7 @@ The current phase is finishing the native Debian path, removing leftover Flatpak
 - Integration tests cover backend classification, result-kind mapping, IBus parsing, error sanitization, and toggle debounce.
 - The old `docs/architecture.md`, `docs/holistic_review.md`, `docs/implementation_plan.md`, and `docs/ship_todo.md` files have been removed because they no longer reflect the current branch state.
 - The standalone `saywrite-host` binary target, user systemd service, D-Bus activation file, and host installer script have been removed from the native path.
+- The primary runtime modules now use native integration naming: `native_integration.rs`, `integration_api.rs`, and `desktop_setup.rs`.
 - Native package smoke validation on April 24, 2026 confirmed that `/usr/bin/saywrite` owns `io.github.saywrite.Host`, reports Direct Typing as `typing` via the IBus backend, and treats the GNOME fallback shortcut as an active hotkey path.
 - Startup migration now removes stale user-local `saywrite-host` artifacts left by older Flatpak-era installs: the user systemd service, D-Bus activation file, and `~/.local/bin/saywrite-host`.
 
@@ -57,8 +58,8 @@ A native `.deb` removes the sandbox boundary entirely. The app runs directly on 
 | XDG portal or `gsettings` for shortcuts | `libkeybinder` or direct D-Bus |
 | Host install flow in Settings | No install flow needed |
 | Host lifecycle management in `app.rs` | Gone |
-| `host_setup.rs` desktop detection | Still useful, but simpler |
-| `host_integration.rs` D-Bus client | Direct D-Bus or IBus calls |
+| `desktop_setup.rs` desktop detection | Still useful, but simpler |
+| `native_integration.rs` D-Bus client | Direct D-Bus or IBus calls |
 | `insertion.rs` in host daemon | Moved into the app |
 | `input.rs` in host daemon | Moved into the app |
 
@@ -84,7 +85,7 @@ A native `.deb` removes the sandbox boundary entirely. The app runs directly on 
 
 1. **Phase 1: `.deb` first** — Build and validate a native `.deb` with `cargo-deb`. Treat Flatpak as legacy context only while the native path finishes stabilising.
 2. **Phase 2: Merge host into app** — Move `insertion.rs`, `input.rs`, and D-Bus service logic into the main app. Remove `saywrite-host` binary.
-3. **Phase 3: Remove Flatpak-specific code** — Strip `flatpak-spawn`, host lifecycle, D-Bus IPC client. Simplify `app.rs`, `host_setup.rs`, `host_integration.rs`.
+3. **Phase 3: Remove Flatpak-specific code** — Strip `flatpak-spawn`, host lifecycle, D-Bus IPC client. Simplify `app.rs`, `desktop_setup.rs`, `native_integration.rs`.
 4. **Phase 4: PPA (optional)** — Set up a Launchpad PPA for automatic `apt` updates once the product stabilizes.
 5. **Phase 5: Flatpak as optional** — Keep Flatpak for users who want sandboxing, but it's no longer the primary distribution channel.
 
@@ -114,7 +115,7 @@ Currently the global hotkey relies on:
 
 ### Detection and Honest Reporting
 
-- Auto-detect the desktop environment and session type at startup ✅ (implemented in `host_setup.rs`)
+- Auto-detect the desktop environment and session type at startup ✅ (implemented in `desktop_setup.rs`)
 - Report the actual insertion method in the UI ✅ (implemented via capability labels)
 - Don't show GNOME-specific setup steps on KDE or other desktops — needs audit
 - Tailor onboarding copy to the detected environment — needs work
@@ -149,11 +150,11 @@ The key UX goal is that users experience one product, not "app plus helper".
 ### Capability Reporting ✅
 - Runtime probing complete: GPU detection, whisper.cpp discovery, local model check
 - Diagnostics page shows insertion backend and hotkey status
-- Onboarding shows real mode from host_status
+- Onboarding shows the real Direct Typing mode from the native integration status
 - Explicit capability states: `typing`, `clipboard-only`, `notification-only`, `unavailable`
 - Explicit result kinds: `typed`, `copied`, `notified`, `failed`
 
-### Host Regression Tests ✅
+### Integration Regression Tests ✅
 - Backend classification, result-kind mapping, IBus parsing
 - Service error sanitization + debounce tests
 
@@ -163,9 +164,9 @@ The key UX goal is that users experience one product, not "app plus helper".
 - Onboarding shortcut page with explicit Change button
 
 ### Desktop Detection ✅
-- `host_setup.rs` detects GNOME Wayland, Other Wayland, X11, Other
+- `desktop_setup.rs` detects GNOME Wayland, Other Wayland, X11, Other
 - Per-profile dependency checks with Ubuntu/Zorin package hints
-- Diagnostics show desktop label, host files status, and dependency status
+- Diagnostics show desktop label, native runtime status, and dependency status
 - GNOME fallback shortcut detection is counted as an active hotkey path when the XDG GlobalShortcuts portal is unavailable
 
 ### Remove Flatpak Assumptions ✅
@@ -174,20 +175,28 @@ The key UX goal is that users experience one product, not "app plus helper".
 - The `saywrite-host` binary target, user service activation files, and host installer script have been deleted
 - Native startup cleans stale user-local host companion files from previous installs so the app can own the compatibility D-Bus name
 
+### Simplify Native Integration Naming ✅
+- `host_api.rs` became `integration_api.rs`
+- `host_integration.rs` became `native_integration.rs`
+- `host_setup.rs` became `desktop_setup.rs`
+- Internal types now use integration/dictation naming instead of host-service naming
+- The legacy `io.github.saywrite.Host` D-Bus identifiers remain only as the temporary compatibility surface for GNOME fallback launchers
+
 ### Tauri Note
 
 There is an exploratory Tauri sketch in `.opencode/plans/tauri_migration_plan.md`, but it is not the active implementation plan. It needs to be rewritten around the current native runtime before it becomes actionable.
 
 ## Release Priorities
 
-Slices 1-3 on `deb-first` are complete:
+Slices 1-3 plus the v0.5 native naming cleanup on `deb-first` are complete:
 
 - `.deb` packaging is wired up with `cargo-deb`
 - the direct-typing runtime has been pulled into the app
 - Flatpak-specific runtime behavior has been removed from the native path
 - the installed package has been validated after removing the old daemon target
+- remaining host-era module names and UI/runtime API names have been simplified around the native in-process controller
 
-The next work is simplifying the remaining compatibility naming and stale copy around `host_api.rs` and `host_integration.rs`, not another transport rewrite.
+The next work is native validation outside the current GNOME Wayland machine: X11 with `xdotool`, non-GNOME Wayland with `wtype`, and any remaining setup copy that should become desktop-specific.
 
 ## `deb-first` Branch Refactor Map
 
@@ -236,8 +245,8 @@ Deleted standalone daemon code:
 
 Compatibility code still present:
 
-- [src/host_integration.rs](/home/fabio/Documents/GitHub/saywrite/src/host_integration.rs): in-process direct-typing integration and compatibility D-Bus surface
-- [src/host_api.rs](/home/fabio/Documents/GitHub/saywrite/src/host_api.rs): shared compatibility constants and status/result names
+- [src/native_integration.rs](/home/fabio/Documents/GitHub/saywrite/src/native_integration.rs): in-process direct-typing integration and compatibility D-Bus adapter
+- [src/integration_api.rs](/home/fabio/Documents/GitHub/saywrite/src/integration_api.rs): runtime status/result vocabulary plus legacy compatibility constants
 
 Implementation direction:
 
@@ -253,8 +262,8 @@ Goal: stop designing the app around the sandbox.
 Files/modules affected:
 
 - [src/app.rs](/home/fabio/Documents/GitHub/saywrite/src/app.rs): remove `systemctl` start/stop/mask lifecycle
-- [src/config.rs](/home/fabio/Documents/GitHub/saywrite/src/config.rs): remove Flatpak host settings sync and install-id assumptions
-- [src/host_setup.rs](/home/fabio/Documents/GitHub/saywrite/src/host_setup.rs): remove host install flow, host path probing, and `flatpak-spawn --host`
+- [src/config.rs](/home/fabio/Documents/GitHub/saywrite/src/config.rs): remove Flatpak settings sync and install-id assumptions
+- [src/desktop_setup.rs](/home/fabio/Documents/GitHub/saywrite/src/desktop_setup.rs): remove install flow, old companion path probing, and `flatpak-spawn --host`
 - [flatpak/io.github.fabio.SayWrite.json](/home/fabio/Documents/GitHub/saywrite/flatpak/io.github.fabio.SayWrite.json): demote, then remove when the branch lands
 - legacy user-local host cleanup: implemented at startup for old `saywrite-host` user service, D-Bus activation file, and `~/.local/bin/saywrite-host`
 
@@ -301,7 +310,7 @@ Still to audit:
 
 1. Add `.deb` packaging so dogfooding moves off Flatpak immediately.
 2. Introduce an in-process integration controller and port host logic into it.
-3. Switch UI/runtime code from `host_*` APIs to the native controller.
+3. Switch UI/runtime code from `host_*` APIs to the native controller. ✅
 4. Remove the app-managed host lifecycle and install flow.
 5. Delete the obsolete daemon, D-Bus, and Flatpak-specific files.
 6. Re-run support-matrix validation on native builds before calling the migration done.
@@ -320,8 +329,8 @@ Still to audit:
 
 ### v0.5 — Merge Host Into App
 1. Remove `saywrite-host` binary and systemd service from the supported native path ✅
-2. Delete remaining migration-era compatibility code and stale copy
-3. Simplify `host_api.rs`, `host_integration.rs`, and related package assets where they only exist for compatibility
+2. Delete migration-era stale copy from the active native path ✅
+3. Simplify `integration_api.rs`, `native_integration.rs`, and related package assets while keeping the temporary compatibility D-Bus surface ✅
 
 ### v1.0 — Polish and PPA
 1. PPA setup for automatic `apt` updates

@@ -6,7 +6,7 @@ use gtk::{glib, Align};
 
 use crate::{
     config::{AppSettings, ModelSize, ProviderMode},
-    dictation, host_integration, model_installer,
+    dictation, model_installer, native_integration,
     runtime::probe_runtime,
     ui::{async_poll, shortcut_capture},
 };
@@ -89,10 +89,12 @@ where
     toast_group.add(&save_toast.widget());
     page.add(&toast_group);
 
-    let host_status = host_integration::host_status();
-    let direct_typing_active = host_status
+    let integration_status = native_integration::integration_status();
+    let direct_typing_active = integration_status
         .as_ref()
-        .map(|status| status.insertion_capability == crate::host_api::INSERTION_CAPABILITY_TYPING)
+        .map(|status| {
+            status.insertion_capability == crate::integration_api::INSERTION_CAPABILITY_TYPING
+        })
         .unwrap_or(false);
 
     let mode_group = adw::PreferencesGroup::builder()
@@ -110,7 +112,7 @@ where
         .build();
     mode_group.add(&mode_status_row);
 
-    if let Some(status) = host_status.as_ref() {
+    if let Some(status) = integration_status.as_ref() {
         if direct_typing_active {
             let direct_typing_row = adw::ActionRow::builder()
                 .title("Direct Typing")
@@ -127,10 +129,10 @@ where
             mode_group.add(&direct_typing_row);
         } else {
             let status_text = match status.insertion_capability.as_str() {
-                crate::host_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY => {
+                crate::integration_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY => {
                     "Unavailable on this desktop. Clipboard Mode is active."
                 }
-                crate::host_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY => {
+                crate::integration_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY => {
                     "Unavailable on this desktop. SayWrite will show the result instead."
                 }
                 _ => "Unavailable on this desktop.",
@@ -144,7 +146,9 @@ where
     } else {
         let manual_row = adw::ActionRow::builder()
             .title("Direct Typing")
-            .subtitle("Clipboard Mode is active while SayWrite finishes starting Direct Typing support.")
+            .subtitle(
+                "Clipboard Mode is active while SayWrite finishes starting Direct Typing support.",
+            )
             .build();
         mode_group.add(&manual_row);
     }
@@ -181,26 +185,26 @@ where
             let save_toast = save_toast.clone();
             let shortcut_label = shortcut_label.clone();
             shortcut_capture::present(btn, &current, move |selected| {
-            let mut state = settings.borrow_mut();
-            if state.global_shortcut_label == selected {
+                let mut state = settings.borrow_mut();
+                if state.global_shortcut_label == selected {
                     return;
-            }
-            state.global_shortcut_label = selected.clone();
-            let save_result = state.save();
-            drop(state);
+                }
+                state.global_shortcut_label = selected.clone();
+                let save_result = state.save();
+                drop(state);
 
-            match save_result {
-                Ok(()) => {
+                match save_result {
+                    Ok(()) => {
                         shortcut_label.set_label(&selected);
-                    match crate::host_setup::apply_shortcut_change(&selected) {
-                        Ok(()) => save_toast.show("Shortcut updated"),
-                        Err(_) => {
-                            save_toast.show("Shortcut saved");
+                        match crate::desktop_setup::apply_shortcut_change(&selected) {
+                            Ok(()) => save_toast.show("Shortcut updated"),
+                            Err(_) => {
+                                save_toast.show("Shortcut saved");
+                            }
                         }
                     }
+                    Err(_) => save_toast.show("Could not save shortcut"),
                 }
-                Err(_) => save_toast.show("Could not save shortcut"),
-            }
             });
         });
     }
@@ -220,9 +224,11 @@ where
         .subtitle("Local runs entirely on your machine. Cloud uses an external API.")
         .build();
     mode_row.set_model(Some(&gtk::StringList::new(&["Local", "Cloud"])));
-    mode_row.set_selected(
-        if settings.borrow().provider_mode == ProviderMode::Cloud { 1 } else { 0 },
-    );
+    mode_row.set_selected(if settings.borrow().provider_mode == ProviderMode::Cloud {
+        1
+    } else {
+        0
+    });
     {
         let settings = settings.clone();
         mode_row.connect_selected_notify(move |row| {
@@ -376,8 +382,12 @@ where
                     let _ = tx.send(Ok(DownloadState::Progress { fraction, label }));
                 });
                 match result {
-                    Ok(_) => { let _ = tx.send(Ok(DownloadState::Done)); }
-                    Err(e) => { let _ = tx.send(Err(e.to_string())); }
+                    Ok(_) => {
+                        let _ = tx.send(Ok(DownloadState::Done));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(e.to_string()));
+                    }
                 }
             });
 
@@ -411,8 +421,7 @@ where
                             progress_row.set_subtitle("Model ready");
                             progress_bar.set_fraction(1.0);
                             let mut state = settings.borrow_mut();
-                            state.local_model_path =
-                                Some(crate::config::model_path_for_size(size));
+                            state.local_model_path = Some(crate::config::model_path_for_size(size));
                             state.model_size = size;
                             let _ = state.save();
                         }
@@ -536,7 +545,7 @@ where
 
     // ── Diagnostics ───────────────────────────────────────────────────────────
     let probe = probe_runtime(&settings.borrow());
-    let host_diag = crate::host_setup::host_diagnostics();
+    let desktop_diag = crate::desktop_setup::desktop_diagnostics();
     let diag_group = adw::PreferencesGroup::builder()
         .title("Diagnostics")
         .build();
@@ -563,9 +572,9 @@ where
             },
         ),
         ("Insertion", probe.insertion_label.clone()),
-        ("Desktop session", host_diag.desktop_label.clone()),
-        ("Runtime", host_diag.host_files_label.clone()),
-        ("Desktop checks", host_diag.dependency_label.clone()),
+        ("Desktop session", desktop_diag.desktop_label.clone()),
+        ("Runtime", desktop_diag.runtime_label.clone()),
+        ("Desktop checks", desktop_diag.dependency_label.clone()),
     ] {
         let row = adw::ActionRow::builder()
             .title(label)
@@ -574,7 +583,7 @@ where
         diag_group.add(&row);
     }
 
-    if let Some(hint) = host_diag.package_hint.as_ref() {
+    if let Some(hint) = desktop_diag.package_hint.as_ref() {
         let row = adw::ActionRow::builder()
             .title("Ubuntu/Zorin")
             .subtitle(hint)

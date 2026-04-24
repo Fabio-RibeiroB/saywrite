@@ -1,6 +1,6 @@
 use std::{env, process::Command};
 
-use crate::host_api;
+use crate::integration_api;
 use anyhow::{anyhow, Context, Result};
 
 use crate::input;
@@ -67,22 +67,26 @@ pub async fn insert_text(text: &str) -> Result<InsertionOutcome> {
 fn capability_for_backend(backend: Backend) -> &'static str {
     match backend {
         Backend::IbusEngine | Backend::Wtype | Backend::Xdotool => {
-            host_api::INSERTION_CAPABILITY_TYPING
+            integration_api::INSERTION_CAPABILITY_TYPING
         }
         Backend::WlClipboard | Backend::Xclip | Backend::Xsel => {
-            host_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY
+            integration_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY
         }
-        Backend::NotifySend => host_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY,
-        Backend::Unavailable => host_api::INSERTION_CAPABILITY_UNAVAILABLE,
+        Backend::NotifySend => integration_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY,
+        Backend::Unavailable => integration_api::INSERTION_CAPABILITY_UNAVAILABLE,
     }
 }
 
 fn result_kind_for_backend(backend: Backend) -> &'static str {
     match backend {
-        Backend::IbusEngine | Backend::Wtype | Backend::Xdotool => host_api::INSERTION_RESULT_TYPED,
-        Backend::WlClipboard | Backend::Xclip | Backend::Xsel => host_api::INSERTION_RESULT_COPIED,
-        Backend::NotifySend => host_api::INSERTION_RESULT_NOTIFIED,
-        Backend::Unavailable => host_api::INSERTION_RESULT_FAILED,
+        Backend::IbusEngine | Backend::Wtype | Backend::Xdotool => {
+            integration_api::INSERTION_RESULT_TYPED
+        }
+        Backend::WlClipboard | Backend::Xclip | Backend::Xsel => {
+            integration_api::INSERTION_RESULT_COPIED
+        }
+        Backend::NotifySend => integration_api::INSERTION_RESULT_NOTIFIED,
+        Backend::Unavailable => integration_api::INSERTION_RESULT_FAILED,
     }
 }
 
@@ -325,22 +329,23 @@ fn notify_transcript(text: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        candidate_backends_for, capability_for_backend, host_api, result_kind_for_backend, Backend,
+        candidate_backends_for, capability_for_backend, integration_api, result_kind_for_backend,
+        Backend,
     };
 
     #[test]
     fn classifies_typing_backends_honestly() {
         assert_eq!(
             capability_for_backend(Backend::IbusEngine),
-            host_api::INSERTION_CAPABILITY_TYPING
+            integration_api::INSERTION_CAPABILITY_TYPING
         );
         assert_eq!(
             capability_for_backend(Backend::Wtype),
-            host_api::INSERTION_CAPABILITY_TYPING
+            integration_api::INSERTION_CAPABILITY_TYPING
         );
         assert_eq!(
             capability_for_backend(Backend::Xdotool),
-            host_api::INSERTION_CAPABILITY_TYPING
+            integration_api::INSERTION_CAPABILITY_TYPING
         );
     }
 
@@ -348,15 +353,15 @@ mod tests {
     fn classifies_clipboard_and_notification_backends_separately() {
         assert_eq!(
             capability_for_backend(Backend::WlClipboard),
-            host_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY
+            integration_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY
         );
         assert_eq!(
             capability_for_backend(Backend::NotifySend),
-            host_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY
+            integration_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY
         );
         assert_eq!(
             capability_for_backend(Backend::Unavailable),
-            host_api::INSERTION_CAPABILITY_UNAVAILABLE
+            integration_api::INSERTION_CAPABILITY_UNAVAILABLE
         );
     }
 
@@ -364,35 +369,35 @@ mod tests {
     fn reports_result_kind_for_each_backend_honestly() {
         assert_eq!(
             result_kind_for_backend(Backend::IbusEngine),
-            host_api::INSERTION_RESULT_TYPED
+            integration_api::INSERTION_RESULT_TYPED
         );
         assert_eq!(
             result_kind_for_backend(Backend::Wtype),
-            host_api::INSERTION_RESULT_TYPED
+            integration_api::INSERTION_RESULT_TYPED
         );
         assert_eq!(
             result_kind_for_backend(Backend::Xdotool),
-            host_api::INSERTION_RESULT_TYPED
+            integration_api::INSERTION_RESULT_TYPED
         );
         assert_eq!(
             result_kind_for_backend(Backend::WlClipboard),
-            host_api::INSERTION_RESULT_COPIED
+            integration_api::INSERTION_RESULT_COPIED
         );
         assert_eq!(
             result_kind_for_backend(Backend::Xclip),
-            host_api::INSERTION_RESULT_COPIED
+            integration_api::INSERTION_RESULT_COPIED
         );
         assert_eq!(
             result_kind_for_backend(Backend::Xsel),
-            host_api::INSERTION_RESULT_COPIED
+            integration_api::INSERTION_RESULT_COPIED
         );
         assert_eq!(
             result_kind_for_backend(Backend::NotifySend),
-            host_api::INSERTION_RESULT_NOTIFIED
+            integration_api::INSERTION_RESULT_NOTIFIED
         );
         assert_eq!(
             result_kind_for_backend(Backend::Unavailable),
-            host_api::INSERTION_RESULT_FAILED
+            integration_api::INSERTION_RESULT_FAILED
         );
     }
 

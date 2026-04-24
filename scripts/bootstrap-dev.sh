@@ -26,7 +26,7 @@ PACKAGES=(
 
 echo "SayWrite development bootstrap"
 echo
-echo "This installs host packages needed for local development only."
+echo "This installs desktop integration packages needed for local development only."
 echo "End users should get these through the native package dependencies."
 echo
 echo "Packages:"

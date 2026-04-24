@@ -5,8 +5,7 @@ use std::{
     rc::Rc,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc,
-        Arc,
+        mpsc, Arc,
     },
     thread,
     time::{Duration, Instant},
@@ -18,8 +17,7 @@ use gtk::{glib, Align, Orientation};
 use crate::{
     config::{AppSettings, ProviderMode},
     dictation::{build_capture_args, list_input_devices},
-    host_api, host_integration,
-    model_installer,
+    integration_api, model_installer, native_integration,
     ui::{async_poll, shortcut_capture},
 };
 
@@ -42,14 +40,14 @@ where
     carousel.set_allow_scroll_wheel(false);
     carousel.set_vexpand(true);
 
-    let host_status = host_integration::host_status();
+    let integration_status = native_integration::integration_status();
 
     carousel.append(&welcome_page(carousel.clone()));
     carousel.append(&mic_page(carousel.clone(), settings.clone()));
     carousel.append(&shortcut_page(
         carousel.clone(),
         settings.clone(),
-        host_status.as_ref(),
+        integration_status.as_ref(),
     ));
     carousel.append(&engine_page(settings.clone(), {
         let window = window.clone();
@@ -152,7 +150,10 @@ fn mic_page(carousel: adw::Carousel, settings: Rc<RefCell<AppSettings>>) -> gtk:
     {
         let saved = settings.borrow().input_device_name.clone();
         if let Some(saved_id) = saved {
-            if let Some(pos) = device_ids.iter().position(|d| d.as_deref() == Some(&saved_id)) {
+            if let Some(pos) = device_ids
+                .iter()
+                .position(|d| d.as_deref() == Some(&saved_id))
+            {
                 device_picker.set_selected(pos as u32);
             }
         }
@@ -325,7 +326,7 @@ fn mic_page(carousel: adw::Carousel, settings: Rc<RefCell<AppSettings>>) -> gtk:
 fn shortcut_page(
     carousel: adw::Carousel,
     settings: Rc<RefCell<AppSettings>>,
-    host_status: Option<&host_api::HostStatus>,
+    integration_status: Option<&integration_api::IntegrationStatus>,
 ) -> gtk::Box {
     let box_ = vertical_card();
 
@@ -340,8 +341,8 @@ fn shortcut_page(
         .build();
     title.add_css_class("title-2");
 
-    let direct_typing = host_status
-        .map(|s| host_api::supports_direct_typing(&s.insertion_capability))
+    let direct_typing = integration_status
+        .map(|s| integration_api::supports_direct_typing(&s.insertion_capability))
         .unwrap_or(false);
 
     let (mode_label, body_text, hint_text) = if direct_typing {
@@ -402,7 +403,7 @@ fn shortcut_page(
                 let _ = state.save();
                 drop(state);
                 shortcut_pill.set_label(&selected);
-                let _ = crate::host_setup::apply_shortcut_change(&selected);
+                let _ = crate::desktop_setup::apply_shortcut_change(&selected);
             });
         });
     }
@@ -636,8 +637,7 @@ where
                             cancel_btn.set_visible(false);
                             {
                                 let mut state = settings_for_save.borrow_mut();
-                                state.local_model_path =
-                                    Some(crate::config::default_model_path());
+                                state.local_model_path = Some(crate::config::default_model_path());
                                 let _ = state.save();
                             }
                             on_complete();

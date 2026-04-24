@@ -4,7 +4,7 @@ use std::{cell::RefCell, rc::Rc, thread};
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
-use crate::{config::AppSettings, host_integration, host_setup, ui};
+use crate::{config::AppSettings, desktop_setup, native_integration, ui};
 
 pub const APP_ID: &str = "io.github.fabio.SayWrite";
 
@@ -53,11 +53,11 @@ fn load_css() {
 }
 
 fn start_native_integration() {
-    host_setup::cleanup_legacy_host_companion();
-    host_integration::start_background_integration();
+    desktop_setup::cleanup_legacy_host_companion();
+    native_integration::start_background_integration();
     thread::spawn(|| {
         let label = AppSettings::load().global_shortcut_label;
-        host_setup::self_heal_gnome_shortcut(&label);
+        desktop_setup::self_heal_gnome_shortcut(&label);
     });
 }
 

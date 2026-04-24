@@ -1,8 +1,7 @@
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc,
-        Arc, Mutex, OnceLock,
+        mpsc, Arc, Mutex, OnceLock,
     },
     thread,
 };
@@ -11,13 +10,12 @@ use anyhow::{anyhow, Result};
 use zbus::{dbus_interface, Connection, ConnectionBuilder};
 
 use crate::{
-    host_api,
-    input,
-    service::{HostService, HostSignalEvent},
+    input, integration_api,
+    service::{DictationEvent, DictationService},
 };
 
 #[derive(Debug, Clone)]
-pub enum HostEvent {
+pub enum IntegrationEvent {
     StateChanged(String),
     TextReady {
         cleaned: String,
@@ -32,9 +30,10 @@ pub enum HostEvent {
 
 static TOKIO_RUNTIME: OnceLock<std::result::Result<tokio::runtime::Runtime, String>> =
     OnceLock::new();
-static HOST_SERVICE: OnceLock<std::result::Result<HostService, String>> = OnceLock::new();
-static SUBSCRIBERS: OnceLock<Mutex<Vec<mpsc::Sender<HostEvent>>>> = OnceLock::new();
-static DBUS_CONNECTION: OnceLock<Mutex<Option<Connection>>> = OnceLock::new();
+static INTEGRATION_SERVICE: OnceLock<std::result::Result<DictationService, String>> =
+    OnceLock::new();
+static SUBSCRIBERS: OnceLock<Mutex<Vec<mpsc::Sender<IntegrationEvent>>>> = OnceLock::new();
+static COMPATIBILITY_DBUS_CONNECTION: OnceLock<Mutex<Option<Connection>>> = OnceLock::new();
 static BACKGROUND_STARTED: AtomicBool = AtomicBool::new(false);
 
 pub fn start_background_integration() {
@@ -55,7 +54,7 @@ pub fn start_background_integration() {
 
         handle.block_on(async {
             init_ibus().await;
-            if let Err(err) = ensure_dbus_server().await {
+            if let Err(err) = ensure_compatibility_dbus_server().await {
                 eprintln!("SayWrite: failed to expose compatibility D-Bus interface: {err}");
             }
             if let Err(err) = input::register_and_listen().await {
@@ -70,9 +69,9 @@ pub fn restart_shortcut_listener() {
 }
 
 pub fn send_text(text: &str) -> Result<String> {
-    let service = host_service()?;
+    let service = integration_service()?;
     let response = tokio_handle()?.block_on(service.insert_text(text));
-    let event = HostEvent::InsertionResult {
+    let event = IntegrationEvent::InsertionResult {
         ok: response.ok,
         result_kind: response.result_kind.clone(),
         message: response.message.clone(),
@@ -87,7 +86,7 @@ pub fn send_text(text: &str) -> Result<String> {
 }
 
 pub fn toggle_dictation() -> Result<String> {
-    let service = host_service()?;
+    let service = integration_service()?;
     let response = tokio_handle()?.block_on(service.toggle_dictation());
     let message = response.message.clone();
     let ok = response.ok;
@@ -100,31 +99,31 @@ pub fn toggle_dictation() -> Result<String> {
     }
 }
 
-pub fn host_available() -> bool {
-    host_status().is_some()
+pub fn integration_available() -> bool {
+    integration_status().is_some()
 }
 
-pub fn host_status() -> Option<host_api::HostStatus> {
+pub fn integration_status() -> Option<integration_api::IntegrationStatus> {
     let handle = tokio_handle().ok()?;
-    let service = host_service().ok()?;
+    let service = integration_service().ok()?;
     Some(handle.block_on(service.get_status()))
 }
 
-pub fn subscribe_host_signals() -> Option<mpsc::Receiver<HostEvent>> {
+pub fn subscribe_integration_events() -> Option<mpsc::Receiver<IntegrationEvent>> {
     let (tx, rx) = mpsc::channel();
     subscribers().lock().ok()?.push(tx);
     Some(rx)
 }
 
-fn subscribers() -> &'static Mutex<Vec<mpsc::Sender<HostEvent>>> {
+fn subscribers() -> &'static Mutex<Vec<mpsc::Sender<IntegrationEvent>>> {
     SUBSCRIBERS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-fn dbus_connection_holder() -> &'static Mutex<Option<Connection>> {
-    DBUS_CONNECTION.get_or_init(|| Mutex::new(None))
+fn compatibility_dbus_connection() -> &'static Mutex<Option<Connection>> {
+    COMPATIBILITY_DBUS_CONNECTION.get_or_init(|| Mutex::new(None))
 }
 
-fn broadcast(event: HostEvent) {
+fn broadcast(event: IntegrationEvent) {
     let mut guard = match subscribers().lock() {
         Ok(guard) => guard,
         Err(_) => return,
@@ -133,19 +132,19 @@ fn broadcast(event: HostEvent) {
     guard.retain(|sender| sender.send(event.clone()).is_ok());
 }
 
-fn broadcast_toggle_events(events: Vec<HostSignalEvent>) {
+fn broadcast_toggle_events(events: Vec<DictationEvent>) {
     for event in events {
         match event {
-            HostSignalEvent::StateChanged(state) => broadcast(HostEvent::StateChanged(state)),
-            HostSignalEvent::TextReady {
+            DictationEvent::StateChanged(state) => broadcast(IntegrationEvent::StateChanged(state)),
+            DictationEvent::TextReady {
                 cleaned_text,
                 raw_text,
-            } => broadcast(HostEvent::TextReady {
+            } => broadcast(IntegrationEvent::TextReady {
                 cleaned: cleaned_text,
                 raw_text,
             }),
-            HostSignalEvent::InsertionResult(response) => {
-                broadcast(HostEvent::InsertionResult {
+            DictationEvent::InsertionResult(response) => {
+                broadcast(IntegrationEvent::InsertionResult {
                     ok: response.ok,
                     result_kind: response.result_kind,
                     message: response.message,
@@ -160,7 +159,7 @@ fn install_toggle_handler() {
         if let Ok(handle) = tokio_handle() {
             let handle = handle.clone();
             handle.spawn(async {
-                let service = match host_service() {
+                let service = match integration_service() {
                     Ok(service) => service.clone(),
                     Err(err) => {
                         eprintln!("SayWrite: native toggle handler unavailable: {err}");
@@ -175,8 +174,8 @@ fn install_toggle_handler() {
     }));
 }
 
-async fn ensure_dbus_server() -> Result<()> {
-    if dbus_connection_holder()
+async fn ensure_compatibility_dbus_server() -> Result<()> {
+    if compatibility_dbus_connection()
         .lock()
         .map(|guard| guard.is_some())
         .unwrap_or(false)
@@ -185,12 +184,15 @@ async fn ensure_dbus_server() -> Result<()> {
     }
 
     let connection = ConnectionBuilder::session()?
-        .name(host_api::BUS_NAME)?
-        .serve_at(host_api::OBJECT_PATH, AppHostInterface)?
+        .name(integration_api::COMPAT_BUS_NAME)?
+        .serve_at(
+            integration_api::COMPAT_OBJECT_PATH,
+            CompatibilityHostInterface,
+        )?
         .build()
         .await?;
 
-    if let Ok(mut guard) = dbus_connection_holder().lock() {
+    if let Ok(mut guard) = compatibility_dbus_connection().lock() {
         *guard = Some(connection);
     }
 
@@ -219,8 +221,9 @@ async fn init_ibus() {
     }
 }
 
-fn host_service() -> Result<&'static HostService> {
-    match HOST_SERVICE.get_or_init(|| HostService::new().map_err(|err| err.to_string())) {
+fn integration_service() -> Result<&'static DictationService> {
+    match INTEGRATION_SERVICE.get_or_init(|| DictationService::new().map_err(|err| err.to_string()))
+    {
         Ok(service) => Ok(service),
         Err(err) => Err(anyhow!("failed to initialize native integration: {err}")),
     }
@@ -244,12 +247,12 @@ fn tokio_handle() -> Result<&'static tokio::runtime::Handle> {
     Ok(tokio_runtime()?.handle())
 }
 
-struct AppHostInterface;
+struct CompatibilityHostInterface;
 
 #[dbus_interface(name = "io.github.saywrite.Host")]
-impl AppHostInterface {
+impl CompatibilityHostInterface {
     async fn get_status(&self) -> (String, bool, bool, String, String) {
-        match host_service() {
+        match integration_service() {
             Ok(service) => {
                 let status = service.get_status().await;
                 (
@@ -264,17 +267,17 @@ impl AppHostInterface {
                 err.to_string(),
                 false,
                 false,
-                host_api::INSERTION_CAPABILITY_UNAVAILABLE.into(),
+                integration_api::INSERTION_CAPABILITY_UNAVAILABLE.into(),
                 "unavailable".into(),
             ),
         }
     }
 
     async fn insert_text(&self, text: &str) -> (bool, String, String) {
-        match host_service() {
+        match integration_service() {
             Ok(service) => {
                 let response = service.insert_text(text).await;
-                broadcast(HostEvent::InsertionResult {
+                broadcast(IntegrationEvent::InsertionResult {
                     ok: response.ok,
                     result_kind: response.result_kind.clone(),
                     message: response.message.clone(),
@@ -283,14 +286,14 @@ impl AppHostInterface {
             }
             Err(err) => (
                 false,
-                host_api::INSERTION_RESULT_FAILED.into(),
+                integration_api::INSERTION_RESULT_FAILED.into(),
                 err.to_string(),
             ),
         }
     }
 
     async fn toggle_dictation(&self) -> (bool, String) {
-        match host_service() {
+        match integration_service() {
             Ok(service) => {
                 let response = service.toggle_dictation().await;
                 let message = response.message.clone();

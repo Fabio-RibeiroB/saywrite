@@ -19,7 +19,7 @@ Works with the app alone. No extra setup required.
 - SayWrite records, transcribes, cleans up your text, and copies it to the clipboard
 - paste into any application
 
-This is the default mode and works on the current builds without host setup.
+This is the default mode and works on the current builds without extra setup.
 
 ### Direct Typing Mode
 
@@ -111,7 +111,7 @@ Install Rust/GTK development dependencies:
 ./scripts/bootstrap-rust-dev.sh
 ```
 
-Install native host dependencies:
+Install native desktop dependencies:
 
 ```bash
 ./scripts/bootstrap-dev.sh
@@ -159,9 +159,9 @@ src/                        Rust app source
   config.rs                 AppSettings, ProviderMode, ModelSize, JSON load/save
   cleanup.rs                Transcript cleanup rules
   dictation.rs              Mic capture, whisper transcription, cloud handoff
-  host_api.rs               D-Bus constants and host status types
-  host_integration.rs       In-process direct-typing integration + compatibility D-Bus interface
-  host_setup.rs             Desktop detection, diagnostics, legacy host cleanup, and GNOME shortcut helpers
+  integration_api.rs        Runtime status/capability vocabulary + legacy D-Bus constants
+  native_integration.rs     In-process direct-typing integration + compatibility D-Bus adapter
+  desktop_setup.rs          Desktop detection, diagnostics, legacy cleanup, and GNOME shortcut helpers
   model_installer.rs        Model download and cache management
   runtime.rs                Capability probing (GPU, whisper, insertion)
 data/                       Desktop metadata and icons
@@ -195,4 +195,4 @@ Current state:
 - Shortcut capture dialog with GNOME keybinding suspend/restore
 - Unit tests cover backend classification, result-kind mapping, IBus parsing, error sanitization, and toggle debounce
 
-The next major milestone on `deb-first` is cleanup: finish simplifying the remaining migration-era naming and compatibility copy around the temporary D-Bus surface. The validated direct-typing path remains GNOME Wayland.
+The next major milestone on `deb-first` is validation: broaden the native package smoke matrix beyond the current GNOME Wayland machine. The validated direct-typing path remains GNOME Wayland.

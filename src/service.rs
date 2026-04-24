@@ -3,8 +3,8 @@ use std::{sync::Arc, time::Instant};
 use crate::{
     config::AppSettings,
     dictation::{self, DictationError},
-    host_api::{
-        HostStatus, INSERTION_RESULT_FAILED, STATE_DONE, STATE_IDLE, STATE_LISTENING,
+    integration_api::{
+        IntegrationStatus, INSERTION_RESULT_FAILED, STATE_DONE, STATE_IDLE, STATE_LISTENING,
         STATE_PROCESSING,
     },
 };
@@ -25,11 +25,11 @@ struct SharedState {
 }
 
 #[derive(Clone)]
-pub struct HostService {
-    inner: Arc<HostServiceInner>,
+pub struct DictationService {
+    inner: Arc<DictationServiceInner>,
 }
 
-struct HostServiceInner {
+struct DictationServiceInner {
     state: Mutex<SharedState>,
     toggle_guard: Mutex<()>,
 }
@@ -42,7 +42,7 @@ pub struct InsertResponse {
 }
 
 #[derive(Debug, Clone)]
-pub enum HostSignalEvent {
+pub enum DictationEvent {
     StateChanged(String),
     TextReady {
         cleaned_text: String,
@@ -55,10 +55,10 @@ pub enum HostSignalEvent {
 pub struct ToggleResponse {
     pub ok: bool,
     pub message: String,
-    pub events: Vec<HostSignalEvent>,
+    pub events: Vec<DictationEvent>,
 }
 
-impl HostService {
+impl DictationService {
     pub fn new() -> Result<Self> {
         let state = SharedState {
             dictation_state: STATE_IDLE.into(),
@@ -68,7 +68,7 @@ impl HostService {
         };
 
         Ok(Self {
-            inner: Arc::new(HostServiceInner {
+            inner: Arc::new(DictationServiceInner {
                 state: Mutex::new(state),
                 toggle_guard: Mutex::new(()),
             }),
@@ -79,13 +79,13 @@ impl HostService {
         input::probe(&AppSettings::load())
     }
 
-    pub async fn get_status(&self) -> HostStatus {
+    pub async fn get_status(&self) -> IntegrationStatus {
         let hotkey = input::probe(&AppSettings::load());
         let insertion = insertion::probe();
         let mut state = self.inner.state.lock().await;
         state.insertion = insertion.clone();
 
-        HostStatus {
+        IntegrationStatus {
             status: format!(
                 "{} [{} via {}]",
                 state.last_status, state.dictation_state, state.insertion.method
@@ -157,8 +157,8 @@ impl HostService {
                         ok: true,
                         message,
                         events: vec![
-                            HostSignalEvent::StateChanged(STATE_PROCESSING.into()),
-                            HostSignalEvent::StateChanged(STATE_LISTENING.into()),
+                            DictationEvent::StateChanged(STATE_PROCESSING.into()),
+                            DictationEvent::StateChanged(STATE_LISTENING.into()),
                         ],
                     }
                 }
@@ -170,8 +170,8 @@ impl HostService {
                         ok: false,
                         message: message.clone(),
                         events: vec![
-                            HostSignalEvent::StateChanged(STATE_PROCESSING.into()),
-                            HostSignalEvent::StateChanged(STATE_IDLE.into()),
+                            DictationEvent::StateChanged(STATE_PROCESSING.into()),
+                            DictationEvent::StateChanged(STATE_IDLE.into()),
                         ],
                     }
                 }
@@ -183,8 +183,8 @@ impl HostService {
                         ok: false,
                         message: message.clone(),
                         events: vec![
-                            HostSignalEvent::StateChanged(STATE_PROCESSING.into()),
-                            HostSignalEvent::StateChanged(STATE_IDLE.into()),
+                            DictationEvent::StateChanged(STATE_PROCESSING.into()),
+                            DictationEvent::StateChanged(STATE_IDLE.into()),
                         ],
                     }
                 }
@@ -215,13 +215,13 @@ impl HostService {
                         ok: insertion_result.ok,
                         message: insertion_result.message.clone(),
                         events: vec![
-                            HostSignalEvent::StateChanged(STATE_PROCESSING.into()),
-                            HostSignalEvent::TextReady {
+                            DictationEvent::StateChanged(STATE_PROCESSING.into()),
+                            DictationEvent::TextReady {
                                 cleaned_text,
                                 raw_text,
                             },
-                            HostSignalEvent::InsertionResult(insertion_result),
-                            HostSignalEvent::StateChanged(STATE_DONE.into()),
+                            DictationEvent::InsertionResult(insertion_result),
+                            DictationEvent::StateChanged(STATE_DONE.into()),
                         ],
                     }
                 }
@@ -233,8 +233,8 @@ impl HostService {
                         ok: false,
                         message: message.clone(),
                         events: vec![
-                            HostSignalEvent::StateChanged(STATE_PROCESSING.into()),
-                            HostSignalEvent::StateChanged(STATE_IDLE.into()),
+                            DictationEvent::StateChanged(STATE_PROCESSING.into()),
+                            DictationEvent::StateChanged(STATE_IDLE.into()),
                         ],
                     }
                 }
@@ -246,8 +246,8 @@ impl HostService {
                         ok: false,
                         message: message.clone(),
                         events: vec![
-                            HostSignalEvent::StateChanged(STATE_PROCESSING.into()),
-                            HostSignalEvent::StateChanged(STATE_IDLE.into()),
+                            DictationEvent::StateChanged(STATE_PROCESSING.into()),
+                            DictationEvent::StateChanged(STATE_IDLE.into()),
                         ],
                     }
                 }
@@ -377,7 +377,7 @@ mod tests {
 
     #[tokio::test]
     async fn debounce_passes_first_toggle_and_rejects_immediate_repeat() {
-        let service = HostService::new().expect("HostService::new");
+        let service = DictationService::new().expect("DictationService::new");
 
         let first = service.reject_if_repeated_toggle().await;
         assert!(
@@ -398,7 +398,7 @@ mod tests {
     async fn debounce_allows_toggle_after_cooldown() {
         use std::time::Duration;
 
-        let service = HostService::new().expect("HostService::new");
+        let service = DictationService::new().expect("DictationService::new");
 
         service.reject_if_repeated_toggle().await;
         // Wait out the 900ms debounce window

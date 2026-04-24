@@ -1,22 +1,22 @@
 use std::{env, fs, path::PathBuf, process::Command};
 
-use crate::host_integration;
+use crate::native_integration;
 
 #[derive(Debug, Clone)]
-pub struct HostSetupStatus {
-    pub host_running: bool,
+pub struct IntegrationSetupStatus {
+    pub integration_running: bool,
 }
 
 #[derive(Debug, Clone)]
-pub struct HostDiagnostics {
+pub struct DesktopDiagnostics {
     pub desktop_label: String,
-    pub host_files_label: String,
+    pub runtime_label: String,
     pub dependency_label: String,
     pub package_hint: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum HostProfile {
+enum DesktopProfile {
     GnomeWayland,
     OtherWayland,
     X11,
@@ -29,19 +29,19 @@ struct CommandRequirement {
     package_hint: Option<&'static str>,
 }
 
-pub fn host_setup_status() -> HostSetupStatus {
-    HostSetupStatus {
-        host_running: host_integration::host_status().is_some(),
+pub fn integration_setup_status() -> IntegrationSetupStatus {
+    IntegrationSetupStatus {
+        integration_running: native_integration::integration_status().is_some(),
     }
 }
 
-pub fn host_diagnostics() -> HostDiagnostics {
-    let profile = host_profile();
+pub fn desktop_diagnostics() -> DesktopDiagnostics {
+    let profile = desktop_profile();
     let missing = missing_requirements(profile);
 
-    HostDiagnostics {
+    DesktopDiagnostics {
         desktop_label: desktop_label(profile),
-        host_files_label: "Direct typing is built into the native app.".into(),
+        runtime_label: "Direct typing is built into the native app.".into(),
         dependency_label: dependency_label(profile, &missing),
         package_hint: dependency_package_hint(&missing),
     }
@@ -86,7 +86,7 @@ pub fn apply_shortcut_change(shortcut: &str) -> Result<(), String> {
     if gnome_shortcuts_supported() {
         ensure_gnome_shortcut(shortcut)?;
     }
-    host_integration::restart_shortcut_listener();
+    native_integration::restart_shortcut_listener();
     Ok(())
 }
 
@@ -301,7 +301,7 @@ fn find_repo_root_for_dev() -> Option<PathBuf> {
         .find_map(find_repo_root)
 }
 
-fn host_profile() -> HostProfile {
+fn desktop_profile() -> DesktopProfile {
     let desktop = env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
     let session = env::var("XDG_SESSION_TYPE").unwrap_or_default();
     let gnome = desktop
@@ -309,33 +309,33 @@ fn host_profile() -> HostProfile {
         .any(|part| part.eq_ignore_ascii_case("gnome"));
 
     if session.eq_ignore_ascii_case("wayland") && gnome {
-        HostProfile::GnomeWayland
+        DesktopProfile::GnomeWayland
     } else if session.eq_ignore_ascii_case("wayland") {
-        HostProfile::OtherWayland
+        DesktopProfile::OtherWayland
     } else if session.eq_ignore_ascii_case("x11") {
-        HostProfile::X11
+        DesktopProfile::X11
     } else {
-        HostProfile::Other
+        DesktopProfile::Other
     }
 }
 
-fn host_command_exists(command: &str) -> bool {
+fn command_exists(command: &str) -> bool {
     let probe = format!("command -v {command} >/dev/null 2>&1");
     match Command::new("sh").args(["-lc", &probe]).status() {
         Ok(status) => status.success(),
         Err(err) => {
-            eprintln!("host command probe failed for {}: {}", command, err);
+            eprintln!("desktop command probe failed for {}: {}", command, err);
             false
         }
     }
 }
 
-fn desktop_label(profile: HostProfile) -> String {
+fn desktop_label(profile: DesktopProfile) -> String {
     match profile {
-        HostProfile::GnomeWayland => "GNOME Wayland".into(),
-        HostProfile::OtherWayland => "Wayland".into(),
-        HostProfile::X11 => "X11".into(),
-        HostProfile::Other => {
+        DesktopProfile::GnomeWayland => "GNOME Wayland".into(),
+        DesktopProfile::OtherWayland => "Wayland".into(),
+        DesktopProfile::X11 => "X11".into(),
+        DesktopProfile::Other => {
             let desktop =
                 env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "Unknown desktop".into());
             let session = env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "unknown session".into());
@@ -344,7 +344,7 @@ fn desktop_label(profile: HostProfile) -> String {
     }
 }
 
-fn requirements_for_profile(profile: HostProfile) -> &'static [CommandRequirement] {
+fn requirements_for_profile(profile: DesktopProfile) -> &'static [CommandRequirement] {
     const GNOME_WAYLAND: &[CommandRequirement] = &[
         CommandRequirement {
             command: "ibus",
@@ -382,32 +382,34 @@ fn requirements_for_profile(profile: HostProfile) -> &'static [CommandRequiremen
     const OTHER: &[CommandRequirement] = &[];
 
     match profile {
-        HostProfile::GnomeWayland => GNOME_WAYLAND,
-        HostProfile::OtherWayland => OTHER_WAYLAND,
-        HostProfile::X11 => X11_REQS,
-        HostProfile::Other => OTHER,
+        DesktopProfile::GnomeWayland => GNOME_WAYLAND,
+        DesktopProfile::OtherWayland => OTHER_WAYLAND,
+        DesktopProfile::X11 => X11_REQS,
+        DesktopProfile::Other => OTHER,
     }
 }
 
-fn missing_requirements(profile: HostProfile) -> Vec<CommandRequirement> {
+fn missing_requirements(profile: DesktopProfile) -> Vec<CommandRequirement> {
     requirements_for_profile(profile)
         .iter()
         .copied()
-        .filter(|req| !host_command_exists(req.command))
+        .filter(|req| !command_exists(req.command))
         .collect()
 }
 
-fn dependency_label(profile: HostProfile, missing: &[CommandRequirement]) -> String {
+fn dependency_label(profile: DesktopProfile, missing: &[CommandRequirement]) -> String {
     if missing.is_empty() {
         return match profile {
-            HostProfile::GnomeWayland => {
+            DesktopProfile::GnomeWayland => {
                 "GNOME Wayland checks look ready for Direct Typing.".into()
             }
-            HostProfile::OtherWayland => {
+            DesktopProfile::OtherWayland => {
                 "Wayland checks look ready for the current fallback path.".into()
             }
-            HostProfile::X11 => "X11 checks look ready for Direct Typing.".into(),
-            HostProfile::Other => "No desktop-specific checks are defined for this session.".into(),
+            DesktopProfile::X11 => "X11 checks look ready for Direct Typing.".into(),
+            DesktopProfile::Other => {
+                "No desktop-specific checks are defined for this session.".into()
+            }
         };
     }
 
@@ -418,15 +420,15 @@ fn dependency_label(profile: HostProfile, missing: &[CommandRequirement]) -> Str
         .join(", ");
 
     match profile {
-        HostProfile::GnomeWayland => format!("Missing GNOME Wayland tools: {names}."),
-        HostProfile::OtherWayland => format!("Missing Wayland tools: {names}."),
-        HostProfile::X11 => format!("Missing X11 tools: {names}."),
-        HostProfile::Other => format!("Missing desktop tools: {names}."),
+        DesktopProfile::GnomeWayland => format!("Missing GNOME Wayland tools: {names}."),
+        DesktopProfile::OtherWayland => format!("Missing Wayland tools: {names}."),
+        DesktopProfile::X11 => format!("Missing X11 tools: {names}."),
+        DesktopProfile::Other => format!("Missing desktop tools: {names}."),
     }
 }
 
 fn dependency_package_hint(missing: &[CommandRequirement]) -> Option<String> {
-    let distro = host_os_release();
+    let distro = os_release();
     let ubuntu_like = distro
         .get("ID")
         .into_iter()
@@ -460,7 +462,7 @@ fn dependency_package_hint(missing: &[CommandRequirement]) -> Option<String> {
     }
 }
 
-fn host_os_release() -> std::collections::HashMap<String, String> {
+fn os_release() -> std::collections::HashMap<String, String> {
     std::fs::read_to_string("/etc/os-release")
         .ok()
         .map(parse_os_release)

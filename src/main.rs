@@ -2,7 +2,8 @@ mod app;
 mod ui;
 
 pub use saywrite::{
-    cleanup, config, dictation, host_api, host_integration, host_setup, model_installer, runtime,
+    cleanup, config, desktop_setup, dictation, integration_api, model_installer,
+    native_integration, runtime,
 };
 
 fn main() -> glib::ExitCode {

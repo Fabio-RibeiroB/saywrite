@@ -470,9 +470,7 @@ pub fn list_input_devices() -> Vec<AudioInputDevice> {
             if id.contains(".monitor") {
                 continue;
             }
-            let label = id
-                .replace("alsa_input.", "")
-                .replace(['_', '.'], " ");
+            let label = id.replace("alsa_input.", "").replace(['_', '.'], " ");
             devices.push(AudioInputDevice { id, label });
         }
     }

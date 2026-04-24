@@ -2,7 +2,7 @@ use std::{env, path::Path, process::Command};
 
 use crate::{
     config::{preferred_model_path, AppSettings, ProviderMode},
-    dictation, host_integration,
+    dictation, native_integration,
 };
 
 #[derive(Debug, Clone)]
@@ -31,17 +31,19 @@ pub fn probe_runtime(settings: &AppSettings) -> RuntimeProbe {
         whisper_cli_found: whisper_cli.exists(),
         whisper_cli_display: shorten_path(&whisper_cli),
         acceleration_label: detect_acceleration(),
-        insertion_label: match host_integration::host_status() {
+        insertion_label: match native_integration::integration_status() {
             Some(status) => format!(
                 "{} via {}",
-                crate::host_api::insertion_capability_label(&status.insertion_capability),
+                crate::integration_api::insertion_capability_label(&status.insertion_capability),
                 status.insertion_backend
             ),
             None => "Clipboard fallback until direct typing is ready".into(),
         },
-        dictation_label: match host_integration::host_status() {
+        dictation_label: match native_integration::integration_status() {
             Some(status) if status.hotkey_active => "Global shortcut ready for dictation".into(),
-            Some(_) => "Direct typing is available, but the global shortcut is not active yet".into(),
+            Some(_) => {
+                "Direct typing is available, but the global shortcut is not active yet".into()
+            }
             None => "Direct typing is still starting up".into(),
         },
         provider_label,

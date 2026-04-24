@@ -1,11 +1,11 @@
 use std::{cell::Cell, cell::RefCell, rc::Rc};
 
-use gtk::{gdk, glib};
-use gtk::prelude::*;
-use libadwaita as adw;
 use adw::prelude::*;
+use gtk::prelude::*;
+use gtk::{gdk, glib};
+use libadwaita as adw;
 
-use crate::host_setup;
+use crate::desktop_setup;
 
 pub fn present<F>(parent: &impl IsA<gtk::Widget>, current_shortcut: &str, on_apply: F)
 where
@@ -140,13 +140,13 @@ where
     // Temporarily disable the GNOME keybinding so the compositor does not
     // swallow keys that are already bound (e.g. the current SayWrite hotkey).
     // Restore the old binding on close unless the user saved a new one.
-    host_setup::suspend_gnome_shortcut();
+    desktop_setup::suspend_gnome_shortcut();
     {
         let restore_shortcut = current_shortcut.to_owned();
         let saved = saved.clone();
         dialog.connect_close_request(move |_| {
             if !saved.get() {
-                host_setup::restore_gnome_shortcut(&restore_shortcut);
+                desktop_setup::restore_gnome_shortcut(&restore_shortcut);
             }
             glib::Propagation::Proceed
         });
@@ -162,8 +162,8 @@ fn capture_shortcut(key: gdk::Key, state: gdk::ModifierType) -> Result<String, &
 
     let key_label = key_label(key).ok_or("That key cannot be used as a shortcut.")?;
     let modifiers = relevant_modifiers(state);
-    let function_key = key_label.starts_with('F')
-        && key_label[1..].chars().all(|ch| ch.is_ascii_digit());
+    let function_key =
+        key_label.starts_with('F') && key_label[1..].chars().all(|ch| ch.is_ascii_digit());
 
     if modifiers.is_empty() && !function_key {
         return Err("Use at least one modifier like Super, Ctrl, Alt, or Shift.");

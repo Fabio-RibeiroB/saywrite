@@ -28,9 +28,9 @@ It should look and feel beautiful. If someone gets stuck setting it up or using 
 | `src/cleanup.rs`                    | `cleanup_transcript()`                                                                  |
 | `src/dictation.rs`                  | microphone session control, whisper.cpp CLI transcription, cloud handoff, session state |
 | `src/model_installer.rs`            | model download, validation, and cache flow                                              |
-| `src/host_integration.rs`           | in-process direct-typing integration + compatibility D-Bus interface                    |
-| `src/host_api.rs`                   | shared D-Bus constants, host status types, capability/result enums                      |
-| `src/host_setup.rs`                 | desktop detection, diagnostics, legacy host cleanup, GNOME shortcut helpers             |
+| `src/native_integration.rs`         | in-process direct-typing integration + compatibility D-Bus adapter                      |
+| `src/integration_api.rs`            | runtime status/capability vocabulary + legacy D-Bus constants                           |
+| `src/desktop_setup.rs`              | desktop detection, diagnostics, legacy cleanup, GNOME shortcut helpers                  |
 | `src/input.rs`                      | shared hotkey + IBus integration                                                        |
 | `src/insertion.rs`                  | shared desktop insertion backends                                                       |
 | `src/service.rs`                    | shared dictation/insertion controller                                                   |

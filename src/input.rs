@@ -759,8 +759,8 @@ pub fn set_toggle_handler(handler: Arc<dyn Fn() + Send + Sync>) {
 }
 
 /// Register a global shortcut via the XDG GlobalShortcuts portal and listen
-/// for activations. On each activation, calls ToggleDictation on the host
-/// D-Bus interface.
+/// for activations. On each activation, toggles the in-process dictation
+/// controller. The D-Bus fallback is kept only for legacy launcher commands.
 pub async fn register_and_listen() -> Result<()> {
     let conn = Connection::session()
         .await
@@ -836,7 +836,7 @@ pub async fn register_and_listen() -> Result<()> {
             if let Some(handler) = TOGGLE_HANDLER.get() {
                 handler();
             } else {
-                toggle_dictation_via_dbus(&conn).await;
+                toggle_dictation_via_compat_dbus(&conn).await;
             }
         }
     }
@@ -979,18 +979,18 @@ async fn wait_for_response(
     }
 }
 
-async fn toggle_dictation_via_dbus(conn: &Connection) {
+async fn toggle_dictation_via_compat_dbus(conn: &Connection) {
     let proxy = match Proxy::new(
         conn,
-        crate::host_api::BUS_NAME,
-        crate::host_api::OBJECT_PATH,
-        crate::host_api::INTERFACE_NAME,
+        crate::integration_api::COMPAT_BUS_NAME,
+        crate::integration_api::COMPAT_OBJECT_PATH,
+        crate::integration_api::COMPAT_INTERFACE_NAME,
     )
     .await
     {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("Failed to create host proxy for toggle: {e}");
+            eprintln!("Failed to create compatibility proxy for toggle: {e}");
             return;
         }
     };
