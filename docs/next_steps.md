@@ -2,7 +2,7 @@
 
 SayWrite has crossed the main technical hurdle: hotkey-driven dictation, cleanup, and direct insertion now work on a real GNOME Wayland machine through the in-process native runtime and IBus bridge.
 
-The current phase is **cross-desktop native validation**: prove the packaged app on X11, non-GNOME Wayland, and degraded fallback sessions before broadening release claims.
+The current phase is **cross-desktop native validation**: prove the packaged `.deb` app on X11, non-GNOME Wayland, and degraded fallback sessions before broadening release claims.
 
 ## Current State
 
@@ -89,7 +89,7 @@ A native `.deb` removes the sandbox boundary entirely. The app runs directly on 
 2. **Phase 2: Merge host into app** — Move `insertion.rs`, `input.rs`, and D-Bus service logic into the main app. Remove `saywrite-host` binary.
 3. **Phase 3: Remove Flatpak-specific code** — Strip `flatpak-spawn`, host lifecycle, D-Bus IPC client. Simplify `app.rs`, `desktop_setup.rs`, `native_integration.rs`.
 4. **Phase 4: PPA (optional)** — Set up a Launchpad PPA for automatic `apt` updates once the product stabilizes.
-5. **Phase 5: Flatpak as optional** — Keep Flatpak for users who want sandboxing, but it's no longer the primary distribution channel.
+5. **Phase 5: Release infrastructure** — Publish native `.deb` artifacts first; revisit PPAs or other update channels after the product stabilizes.
 
 ## Cross-Desktop Compatibility
 
@@ -190,7 +190,7 @@ There is an exploratory Tauri sketch in `.opencode/plans/tauri_migration_plan.md
 
 ## Release Priorities
 
-Slices 1-3 plus the v0.5 native naming cleanup on `deb-first` are complete:
+Slices 1-3 plus the v0.5 native naming cleanup are complete:
 
 - `.deb` packaging is wired up with `cargo-deb`
 - the direct-typing runtime has been pulled into the app
@@ -210,9 +210,9 @@ The only remaining local GNOME Wayland matrix target is a Qt text editor such as
 
 While testing, audit onboarding, Settings, diagnostics, and setup copy so GNOME-specific guidance only appears on GNOME sessions.
 
-## `deb-first` Branch Refactor Map
+## Native Package Refactor Map
 
-This branch is the native packaging and architecture migration branch. It stays in the same repo; the goal is to prove the Debian-first path without forking the project or carrying two long-term runtime models.
+The native packaging and architecture migration is the primary runtime model. The goal is to ship the Debian-first path without carrying two long-term app/host distribution models.
 
 ### Target Shape
 
@@ -238,7 +238,7 @@ Files/modules affected:
 Deliverable:
 
 - a native `.deb` that installs the current app cleanly on Ubuntu/Zorin
-- Flatpak remains available, but is no longer the default dogfooding path
+- Flatpak is no longer the supported user install path
 
 #### Slice 2: Pull host logic into the app
 
@@ -276,7 +276,7 @@ Files/modules affected:
 - [src/app.rs](/home/fabio/Documents/GitHub/saywrite/src/app.rs): remove `systemctl` start/stop/mask lifecycle
 - [src/config.rs](/home/fabio/Documents/GitHub/saywrite/src/config.rs): remove Flatpak settings sync and install-id assumptions
 - [src/desktop_setup.rs](/home/fabio/Documents/GitHub/saywrite/src/desktop_setup.rs): remove install flow, old companion path probing, and `flatpak-spawn --host`
-- [flatpak/io.github.fabio.SayWrite.json](/home/fabio/Documents/GitHub/saywrite/flatpak/io.github.fabio.SayWrite.json): demote, then remove when the branch lands
+- Flatpak manifest: removed from the active distribution path
 - legacy user-local host cleanup: implemented at startup for old `saywrite-host` user service, D-Bus activation file, and `~/.local/bin/saywrite-host`
 
 What stays:
@@ -332,7 +332,7 @@ Still to audit:
 - Do not promise universal Linux support just because the sandbox is gone.
 - Keep GNOME Wayland as the primary validated path until X11/KDE/wlroots are actually tested.
 - Preserve Clipboard Mode as the safe fallback.
-- Avoid a second long-lived architecture; native becomes primary, Flatpak is either degraded or removed.
+- Avoid a second long-lived architecture; native `.deb` remains primary and Flatpak is removed from the supported user path.
 
 ### v0.4 — `.deb` Packaging
 1. Publish a Debian dev package for Ubuntu/Zorin dogfooding ✅

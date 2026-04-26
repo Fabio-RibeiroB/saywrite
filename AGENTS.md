@@ -15,7 +15,7 @@ It should look and feel beautiful. If someone gets stuck setting it up or using 
 - **Audio**: GStreamer 1.0
 - **ASR**: whisper.cpp (local), configurable cloud API (OpenAI-compatible)
 - **IPC**: D-Bus via `zbus` for compatibility paths and desktop integration
-- **Packaging**: native `.deb`-first on the `deb-first` branch
+- **Packaging**: native `.deb` package is the primary distribution path
 
 ## Current Layout
 
@@ -103,7 +103,7 @@ When writing copy, diagnostics, or onboarding text, use these mode names. Do not
 - Run `cargo check` before deeper changes.
 - Prefer checking both binaries when touching shared interfaces or compatibility paths.
 - No mocking of filesystem or GStreamer when real objects are practical.
-- On `deb-first`, validate native behavior with `cargo check`, `cargo test`, and `cargo deb` builds. If the user needs to test an installed package, rebuild the `.deb` and reinstall it before asking them to try anything.
+- Validate native package behavior with `cargo check`, `cargo test`, and `cargo deb` builds. If the user needs to test an installed package, rebuild the `.deb` and reinstall it before asking them to try anything.
 
 ## Docs
 

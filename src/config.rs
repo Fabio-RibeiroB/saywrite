@@ -133,8 +133,10 @@ impl AppSettings {
             }
         };
 
-        if parsed.local_model_path.is_none() && default_model.exists() {
-            parsed.local_model_path = Some(default_model);
+        let mut should_save = false;
+
+        if repair_missing_model_path(&mut parsed.local_model_path, &default_model) {
+            should_save = true;
         }
         if parsed
             .global_shortcut_label
@@ -142,6 +144,9 @@ impl AppSettings {
             .eq_ignore_ascii_case(LEGACY_SHORTCUT)
         {
             parsed.global_shortcut_label = default_shortcut();
+            should_save = true;
+        }
+        if should_save {
             let _ = parsed.save();
         }
 
@@ -205,6 +210,20 @@ pub fn model_path_for_size(size: ModelSize) -> PathBuf {
     local_models_dir().join(size.filename())
 }
 
+fn repair_missing_model_path(local_model_path: &mut Option<PathBuf>, default_model: &Path) -> bool {
+    if !default_model.exists() {
+        return false;
+    }
+
+    match local_model_path {
+        Some(path) if path.exists() => false,
+        _ => {
+            *local_model_path = Some(default_model.to_path_buf());
+            true
+        }
+    }
+}
+
 fn default_provider_mode() -> ProviderMode {
     ProviderMode::Local
 }
@@ -237,4 +256,65 @@ fn set_private_permissions(path: &Path) -> anyhow::Result<()> {
 #[cfg(not(unix))]
 fn set_private_permissions(_path: &Path) -> anyhow::Result<()> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_model_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "saywrite-config-test-{name}-{}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn repair_missing_model_path_uses_existing_default_model() {
+        let default_model = temp_model_path("default-model");
+        fs::write(&default_model, b"model").unwrap();
+
+        let stale_path = temp_model_path("stale-flatpak-model");
+        let mut local_model_path = Some(stale_path);
+
+        assert!(repair_missing_model_path(
+            &mut local_model_path,
+            &default_model
+        ));
+        assert_eq!(local_model_path, Some(default_model.clone()));
+
+        let _ = fs::remove_file(default_model);
+    }
+
+    #[test]
+    fn repair_missing_model_path_preserves_existing_custom_model() {
+        let default_model = temp_model_path("default-model-preserve");
+        let custom_model = temp_model_path("custom-model-preserve");
+        fs::write(&default_model, b"default").unwrap();
+        fs::write(&custom_model, b"custom").unwrap();
+
+        let mut local_model_path = Some(custom_model.clone());
+
+        assert!(!repair_missing_model_path(
+            &mut local_model_path,
+            &default_model
+        ));
+        assert_eq!(local_model_path, Some(custom_model.clone()));
+
+        let _ = fs::remove_file(default_model);
+        let _ = fs::remove_file(custom_model);
+    }
+
+    #[test]
+    fn repair_missing_model_path_does_nothing_without_default_model() {
+        let default_model = temp_model_path("missing-default-model");
+        let stale_path = temp_model_path("stale-model-no-default");
+        let mut local_model_path = Some(stale_path.clone());
+
+        assert!(!repair_missing_model_path(
+            &mut local_model_path,
+            &default_model
+        ));
+        assert_eq!(local_model_path, Some(stale_path));
+    }
 }

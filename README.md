@@ -2,7 +2,7 @@
 
 SayWrite is a Linux dictation app. Press a hotkey, speak, and your words land in the active text field — cleaned up and ready to use.
 
-The `deb-first` branch is the native Debian-first line. Native Debian/Ubuntu/Zorin installs are the primary target, and Direct Typing is now brought up by the app itself on native builds.
+SayWrite is distributed as a native Debian package for Debian-family systems. Native Debian/Ubuntu/Zorin installs are the primary target, and Direct Typing is brought up by the app itself on native builds.
 
 > **Early work in progress.** SayWrite is still under active development. It works well on the setups it has been tested on, but it may not work for you yet. Direct typing support is desktop-dependent, and not every Linux environment is validated. If you try it and something breaks, that feedback is welcome.
 
@@ -51,7 +51,7 @@ Do not expect universal direct typing support across Linux desktops yet. GNOME W
 
 ```
 ┌─────────────────────────────┐
-│  Native app (GTK/Adwaita)   │  ← primary target on deb-first
+│  Native app (GTK/Adwaita)   │  ← primary runtime
 │  settings · diagnostics     │
 │  transcript preview         │
 └────────────┬────────────────┘
@@ -67,19 +67,23 @@ The native build now owns dictation control, shortcut handling, and direct typin
 
 ## Getting Started
 
-This branch is moving toward native Debian packaging. Until dedicated `.deb` artifacts are published, the practical dogfooding path is a native source build on Debian-family systems.
+Install SayWrite from the native `.deb` package on Debian-family systems. Flatpak is no longer the supported user install path.
 
-### Option 1: Native Build on Debian/Ubuntu/Zorin (Recommended on `deb-first`)
+### Debian/Ubuntu/Zorin Package
 
-Use this path if you are testing the Debian-first migration. It keeps you on the native runtime model we are moving toward.
+Download the latest `saywrite_*_amd64.deb` package from the project release artifacts, then install it with apt:
 
 ```bash
-git clone https://github.com/Fabio-RibeiroB/saywrite.git
-cd saywrite
-cargo run --release
+sudo apt install ./saywrite_0.3.5-1_amd64.deb
 ```
 
-Dedicated `.deb` packaging is wired up on this branch, but this README does not claim that published `.deb` release assets already exist.
+Then launch **SayWrite** from the app launcher or run:
+
+```bash
+saywrite
+```
+
+The package installs the app binary, desktop launcher, icon, AppStream metadata, and GNOME shortcut helper. There is no separate host companion to install.
 
 ### After First Launch
 
@@ -102,7 +106,7 @@ SayWrite takes the opposite approach: opinionated defaults, polished UI, and sys
 
 > **Note:** This section is for contributors building from source. It is not the end-user install flow.
 
-On `deb-first`, native development and native dogfooding are the supported paths.
+Native development and package dogfooding are the supported contributor paths.
 
 ### Prerequisites (Ubuntu-like systems)
 
@@ -122,6 +126,13 @@ Install native desktop dependencies:
 
 ```bash
 cargo run
+```
+
+### Build the Native Package
+
+```bash
+cargo deb
+sudo apt install --reinstall ./target/debian/saywrite_0.3.5-1_amd64.deb
 ```
 
 ### Local Whisper Backend
@@ -181,7 +192,7 @@ Key docs:
 
 ## Current Implementation Status
 
-The current supported runtime on `deb-first` is native and in-process.
+The current supported runtime is native and in-process.
 
 Current state:
 - GTK app with onboarding, main dictation window, settings, and diagnostics
@@ -196,4 +207,4 @@ Current state:
 - Shortcut capture dialog with GNOME keybinding suspend/restore
 - Unit tests cover backend classification, result-kind mapping, IBus parsing, error sanitization, and toggle debounce
 
-The next major milestone on `deb-first` is cross-desktop native validation: use the support matrix runbook to test the installed package on X11, KDE or wlroots Wayland, and one degraded fallback session. The validated direct-typing path remains GNOME Wayland until those rows pass.
+The next major milestone is cross-desktop native validation: use the support matrix runbook to test the installed package on X11, KDE or wlroots Wayland, and one degraded fallback session. The validated direct-typing path remains GNOME Wayland until those rows pass.
