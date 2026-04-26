@@ -79,7 +79,7 @@ cargo deb
 Expected package:
 
 ```text
-target/debian/saywrite_0.3.5-1_amd64.deb
+target/debian/saywrite_0.4.0-1_amd64.deb
 ```
 
 ### 2. Install the Native Package
@@ -87,7 +87,7 @@ target/debian/saywrite_0.3.5-1_amd64.deb
 Install the newly built package before testing installed behavior:
 
 ```bash
-sudo apt install --reinstall ./target/debian/saywrite_0.3.5-1_amd64.deb
+sudo apt install --reinstall ./target/debian/saywrite_0.4.0-1_amd64.deb
 ```
 
 After installing, confirm the package does not ship old companion runtime files:

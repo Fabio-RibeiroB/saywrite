@@ -74,7 +74,7 @@ Install SayWrite from the native `.deb` package on Debian-family systems. Flatpa
 Download the latest `saywrite_*_amd64.deb` package from the project release artifacts, then install it with apt:
 
 ```bash
-sudo apt install ./saywrite_0.3.5-1_amd64.deb
+sudo apt install ./saywrite_0.4.0-1_amd64.deb
 ```
 
 Then launch **SayWrite** from the app launcher or run:
@@ -132,7 +132,7 @@ cargo run
 
 ```bash
 cargo deb
-sudo apt install --reinstall ./target/debian/saywrite_0.3.5-1_amd64.deb
+sudo apt install --reinstall ./target/debian/saywrite_0.4.0-1_amd64.deb
 ```
 
 ### Local Whisper Backend

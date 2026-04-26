@@ -142,7 +142,7 @@ The key UX goal is that users experience one product, not "app plus helper".
 - Native `.deb` packaging is wired up with `cargo-deb`
 - The installed package matches the current in-process runtime
 - Support docs now point at the native release path instead of Flatpak-first setup
-- Rebuilt and reinstalled `target/debian/saywrite_0.3.5-1_amd64.deb` on April 24, 2026; package contents contain `saywrite`, `saywrite-dictation.sh`, desktop metadata, icon, metainfo, and no `saywrite-host` service assets
+- Rebuilt and reinstalled the native `.deb` on April 24, 2026; package contents contain `saywrite`, `saywrite-dictation.sh`, desktop metadata, icon, metainfo, and no `saywrite-host` service assets
 
 ### Harden the IBus Path ✅
 - Fixed race condition, added retry logic, comprehensive logging
