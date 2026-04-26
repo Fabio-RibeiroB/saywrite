@@ -6,9 +6,9 @@ use gtk::{gdk, glib, Align, Orientation};
 
 use crate::{
     config::AppSettings,
-    host_api,
-    host_integration::{self, HostEvent},
-    model_installer, runtime,
+    integration_api, model_installer,
+    native_integration::{self, IntegrationEvent},
+    runtime,
     ui::async_poll,
 };
 
@@ -238,7 +238,7 @@ pub(super) fn build_body(
     let done_btn = gtk::Button::with_label("Done");
     done_btn.add_css_class("pill");
 
-    let host_status = host_integration::host_status();
+    let integration_status = native_integration::integration_status();
 
     let action_row = gtk::Box::new(Orientation::Horizontal, 16);
     action_row.set_halign(Align::Center);
@@ -252,9 +252,8 @@ pub(super) fn build_body(
     action_revealer.set_reveal_child(false);
     action_revealer.set_child(Some(&action_row));
 
-    // Dictation control: clickable fallback for users whose hotkey isn't
-    // working (non-GNOME, portal unavailable). Toggles dictation via the
-    // same D-Bus call the hotkey uses.
+    // Dictation control: clickable fallback for users whose hotkey is not
+    // active yet. This calls the in-process integration controller directly.
     let dictate_btn = gtk::Button::with_label("  Press Hotkey or Click to Start  ");
     dictate_btn.add_css_class("suggested-action");
     dictate_btn.add_css_class("pill");
@@ -286,7 +285,7 @@ pub(super) fn build_body(
     };
 
     // Initialise insertion chip content
-    ui.refresh_insertion_chip(host_status.clone());
+    ui.refresh_insertion_chip(integration_status.clone());
 
     // Check readiness and gate the button
     refresh_window_state(&ui, &settings);
@@ -307,7 +306,7 @@ pub(super) fn build_body(
 
             let (tx, rx) = mpsc::channel::<Result<String, String>>();
             thread::spawn(move || {
-                let result = host_integration::toggle_dictation().map_err(|e| e.to_string());
+                let result = native_integration::toggle_dictation().map_err(|e| e.to_string());
                 let _ = tx.send(result);
             });
 
@@ -324,7 +323,7 @@ pub(super) fn build_body(
                     glib::ControlFlow::Break
                 },
                 move || {
-                    ui_for_disconnect.apply_host_disconnect();
+                    ui_for_disconnect.apply_integration_disconnect();
                     glib::ControlFlow::Break
                 },
             );
@@ -453,28 +452,28 @@ pub(super) fn build_body(
         });
     }
 
-    // --- D-Bus signal subscription ---
+    // --- Native integration events ---
     {
-        if let Some(rx) = host_integration::subscribe_host_signals() {
+        if let Some(rx) = native_integration::subscribe_integration_events() {
             let ui = ui.clone();
             let settings = settings.clone();
             let activity_stack = activity_stack.clone();
             glib::timeout_add_local(Duration::from_millis(100), move || {
                 while let Ok(event) = rx.try_recv() {
                     match event {
-                        HostEvent::StateChanged(state) => {
-                            if state == host_api::STATE_LISTENING {
+                        IntegrationEvent::StateChanged(state) => {
+                            if state == integration_api::STATE_LISTENING {
                                 activity_stack.set_visible_child_name("waveform");
                             } else {
                                 activity_stack.set_visible_child_name("spinner");
                             }
-                            ui.apply_host_state(&state);
+                            ui.apply_integration_state(&state);
                             refresh_window_state(&ui, &settings);
                         }
-                        HostEvent::TextReady { cleaned, raw_text } => {
+                        IntegrationEvent::TextReady { cleaned, raw_text } => {
                             ui.show_transcript(&cleaned, &raw_text)
                         }
-                        HostEvent::InsertionResult {
+                        IntegrationEvent::InsertionResult {
                             ok,
                             result_kind,
                             message,
@@ -541,20 +540,20 @@ pub(super) fn refresh_window_state(ui: &MainWindowUi, settings: &Rc<RefCell<AppS
     use crate::config::ProviderMode;
 
     let settings_ref = settings.borrow();
-    let host_status = host_integration::host_status();
-    ui.refresh_insertion_chip(host_status.clone());
+    let integration_status = native_integration::integration_status();
+    ui.refresh_insertion_chip(integration_status.clone());
 
-    let host_setup = crate::host_setup::host_setup_status();
+    let integration_setup = crate::desktop_setup::integration_setup_status();
     let probe = runtime::probe_runtime(&settings_ref);
 
-    if host_status.is_none() {
+    if integration_status.is_none() {
         ui.set_setup_state(
-            "Press your hotkey to start dictation",
+            "Starting direct typing support",
             "Clipboard Mode is active",
-            if host_setup.binary_installed {
-                "The host companion looks installed, but SayWrite cannot reach it yet. Open Settings to reconnect it."
+            if integration_setup.integration_running {
+                "SayWrite is still starting direct typing support. Open Settings for diagnostics if it does not recover."
             } else {
-                "Open Settings to install the host companion if you want Direct Typing. Clipboard Mode still works with your hotkey."
+                "SayWrite is still bringing up direct typing support. Clipboard Mode still works while it starts."
             },
             SetupAction::OpenSettings,
             true,
@@ -602,14 +601,14 @@ pub(super) fn refresh_window_state(ui: &MainWindowUi, settings: &Rc<RefCell<AppS
         }
     }
 
-    if let Some(status) = host_status {
-        if !host_api::supports_direct_typing(&status.insertion_capability) {
+    if let Some(status) = integration_status {
+        if !integration_api::supports_direct_typing(&status.insertion_capability) {
             let (state_label, detail) = match status.insertion_capability.as_str() {
-                host_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY => (
+                integration_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY => (
                     "Clipboard Mode is active",
                     "Clipboard Mode is active on this desktop. Open Settings for Direct Typing status and setup.",
                 ),
-                host_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY => (
+                integration_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY => (
                     "Direct Typing is unavailable here",
                     "This desktop can only show the result instead of typing it directly. Open Settings for details.",
                 ),

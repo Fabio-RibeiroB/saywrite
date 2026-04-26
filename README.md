@@ -2,7 +2,7 @@
 
 SayWrite is a Linux dictation app. Press a hotkey, speak, and your words land in the active text field — cleaned up and ready to use.
 
-Install through Flatpak. Use it right away with clipboard delivery. Optionally enable direct typing for deeper system integration.
+SayWrite is distributed as a native Debian package for Debian-family systems. Native Debian/Ubuntu/Zorin installs are the primary target, and Direct Typing is brought up by the app itself on native builds.
 
 > **Early work in progress.** SayWrite is still under active development. It works well on the setups it has been tested on, but it may not work for you yet. Direct typing support is desktop-dependent, and not every Linux environment is validated. If you try it and something breaks, that feedback is welcome.
 
@@ -12,24 +12,24 @@ SayWrite has two user-facing modes:
 
 ### Clipboard Mode
 
-Works with the Flatpak app alone. No host setup required.
+Works with the app alone. No extra setup required.
 
 - press the dictation hotkey
 - speak
 - SayWrite records, transcribes, cleans up your text, and copies it to the clipboard
 - paste into any application
 
-This is the default mode and works on any desktop where the Flatpak runs.
+This is the default mode and works on the current builds without extra setup.
 
 ### Direct Typing Mode
 
-Requires the host companion (`saywrite-host`) installed alongside the Flatpak.
+Works on supported desktops with no separate companion install.
 
 - press the dictation hotkey
 - speak
 - SayWrite types the cleaned text directly into the focused application
 
-Direct typing is hotkey-driven while SayWrite is running — you do not need to keep the window focused. Closing the app disarms the host companion so dictation does not keep running in the background.
+Direct typing is hotkey-driven while SayWrite is running — you do not need to keep the window focused.
 
 You can replay onboarding from Settings at any time if you want to re-check microphone, hotkey, or mode setup.
 
@@ -39,18 +39,19 @@ You can replay onboarding from Settings at any time if you want to re-check micr
 |---|---|---|
 | GNOME Wayland + IBus | Supported | Supported |
 | X11 + xdotool | Untested | Supported |
+| KDE Plasma Wayland + wtype | Untested | Supported |
 | wlroots Wayland + wtype | Untested | Supported |
 | Other Wayland compositors | Not available | Supported |
 
-**Supported** means tested end-to-end on real hardware. **Untested** means the code path exists but has not yet been validated. Clipboard Mode works everywhere the Flatpak runs.
+**Supported** means tested end-to-end on real hardware. **Untested** means the code path exists but has not yet been validated.
 
-Do not expect universal direct typing support across all Linux desktops yet. The GNOME Wayland path (via IBus) is the current validated path. More environments will be confirmed as testing expands.
+Do not expect universal direct typing support across Linux desktops yet. GNOME Wayland via IBus is the current validated path. More environments will be confirmed only after they are tested.
 
 ## Current Product Model
 
 ```
 ┌─────────────────────────────┐
-│  Flatpak app (GTK/Adwaita)  │  ← install via Flatpak / Flathub
+│  Native app (GTK/Adwaita)   │  ← primary runtime
 │  settings · diagnostics     │
 │  transcript preview         │
 └────────────┬────────────────┘
@@ -58,60 +59,38 @@ Do not expect universal direct typing support across all Linux desktops yet. The
              │ Clipboard Mode (default)
              │   transcript → clipboard → paste anywhere
              │
-             │ Direct Typing Mode (optional host companion)
-             │   transcript → saywrite-host → IBus → active text field
-             │
-             ▼
-┌─────────────────────────────┐
-│  saywrite-host (native)     │  ← installed outside Flatpak sandbox
-│  IBus engine · fallbacks    │
-└─────────────────────────────┘
+             │ Direct Typing Mode
+             │   transcript → in-process insertion → active text field
 ```
 
-The Flatpak sandbox cannot inject keystrokes into arbitrary host applications. The host companion runs outside that boundary and handles text insertion. This is an intentional design, not a workaround: the Flatpak handles discovery, onboarding, and settings; the host companion handles system-wide input.
+The native build now owns dictation control, shortcut handling, and direct typing itself. Desktop-specific insertion backends still determine whether true typing is available.
 
 ## Getting Started
 
-SayWrite is distributed as a Flatpak. It is not yet on Flathub, but you can install it directly from a GitHub release or by building locally.
+Install SayWrite from the native `.deb` package on Debian-family systems. Flatpak is no longer the supported user install path.
 
-### Option 1: Install from a GitHub Release (Recommended)
+### Debian/Ubuntu/Zorin Package
 
-Each release ships a pre-built `.flatpak` bundle. Grab the latest release from the [Releases page](https://github.com/Fabio-RibeiroB/saywrite/releases) and install it:
-
-```bash
-# Download the latest Flatpak bundle
-curl -L -o saywrite.flatpak \
-  "https://github.com/Fabio-RibeiroB/saywrite/releases/latest/download/saywrite-x86_64.flatpak"
-
-# Install it (this also pulls in the GNOME 48 runtime if needed)
-flatpak install --user ./saywrite.flatpak
-
-# Run it
-flatpak run io.github.fabio.SayWrite
-```
-
-You can also install a specific version by replacing `latest` with a tag, for example `download/v0.3.0/saywrite-x86_64.flatpak`.
-
-### Option 2: Build and Install from Source
-
-If you prefer to build from the repository:
+Download the latest `saywrite_*_amd64.deb` package from the project release artifacts, then install it with apt:
 
 ```bash
-# Clone and build
-git clone https://github.com/Fabio-RibeiroB/saywrite.git
-cd saywrite
-flatpak-builder --user --install --force-clean build-dir flatpak/io.github.fabio.SayWrite.json
-
-# Run it
-flatpak run io.github.fabio.SayWrite
+sudo apt install ./saywrite_0.3.5-1_amd64.deb
 ```
+
+Then launch **SayWrite** from the app launcher or run:
+
+```bash
+saywrite
+```
+
+The package installs the app binary, desktop launcher, icon, AppStream metadata, and GNOME shortcut helper. There is no separate host companion to install.
 
 ### After First Launch
 
 1. Complete the onboarding carousel to set up your microphone and dictation shortcut.
 2. Choose **Local** (whisper.cpp) or **Cloud** (OpenAI-compatible API) as your transcription provider.
-3. For **Direct Typing Mode**, install the host companion from Settings — this enables hotkey-driven dictation with text inserted directly into the focused application.
-4. Without the host companion, **Clipboard Mode** works immediately: dictation copies cleaned text to your clipboard for you to paste anywhere.
+3. **Direct Typing Mode** is available automatically when your desktop session supports it.
+4. **Clipboard Mode** remains the fallback when direct typing is unavailable on the current desktop.
 
 ## Why SayWrite
 
@@ -127,6 +106,8 @@ SayWrite takes the opposite approach: opinionated defaults, polished UI, and sys
 
 > **Note:** This section is for contributors building from source. It is not the end-user install flow.
 
+Native development and package dogfooding are the supported contributor paths.
+
 ### Prerequisites (Ubuntu-like systems)
 
 Install Rust/GTK development dependencies:
@@ -135,7 +116,7 @@ Install Rust/GTK development dependencies:
 ./scripts/bootstrap-rust-dev.sh
 ```
 
-Install native host dependencies:
+Install native desktop dependencies:
 
 ```bash
 ./scripts/bootstrap-dev.sh
@@ -147,6 +128,13 @@ Install native host dependencies:
 cargo run
 ```
 
+### Build the Native Package
+
+```bash
+cargo deb
+sudo apt install --reinstall ./target/debian/saywrite_0.3.5-1_amd64.deb
+```
+
 ### Local Whisper Backend
 
 To use local transcription, build and set up `whisper.cpp`:
@@ -155,17 +143,6 @@ To use local transcription, build and set up `whisper.cpp`:
 ./scripts/setup-whispercpp.sh
 ./scripts/download-local-model.sh
 ```
-
-### Host Companion (Direct Typing Mode)
-
-Build and install `saywrite-host`:
-
-```bash
-cargo build --release
-./scripts/install-host.sh
-```
-
-The install script requires the release binary at `target/release/saywrite-host`. The `--release` flag is required; a debug build will not satisfy this path. The script installs the companion daemon and sets up the systemd user service and D-Bus activation.
 
 ### GNOME Shortcut (Developer Fallback)
 
@@ -176,13 +153,15 @@ chmod +x ./scripts/run-global-dictation.sh ./scripts/install-gnome-shortcut.sh
 ./scripts/install-gnome-shortcut.sh
 ```
 
-This binds `Super+Alt+D` to trigger dictation via D-Bus.
+This binds `Super+Alt+D` to trigger dictation through the app's compatibility D-Bus interface.
 
 ## Repository Layout
 
 ```
 src/                        Rust app source
-  bin/saywrite-host/        Host companion daemon (dbus, input, insertion, service)
+  input.rs                  Shared hotkey + IBus integration
+  insertion.rs              Shared desktop insertion backends
+  service.rs                Shared dictation/insertion controller
   ui/                       GTK/libadwaita UI components
     main_window/            Main dictation window
     onboarding.rs           Onboarding carousel
@@ -192,13 +171,12 @@ src/                        Rust app source
   config.rs                 AppSettings, ProviderMode, ModelSize, JSON load/save
   cleanup.rs                Transcript cleanup rules
   dictation.rs              Mic capture, whisper transcription, cloud handoff
-  host_api.rs               D-Bus constants and host status types
-  host_integration.rs       D-Bus client for host communication
-  host_setup.rs             Host install flow and desktop detection
+  integration_api.rs        Runtime status/capability vocabulary + legacy D-Bus constants
+  native_integration.rs     In-process direct-typing integration + compatibility D-Bus adapter
+  desktop_setup.rs          Desktop detection, diagnostics, legacy cleanup, and GNOME shortcut helpers
   model_installer.rs        Model download and cache management
   runtime.rs                Capability probing (GPU, whisper, insertion)
 data/                       Desktop metadata and icons
-flatpak/                    Flatpak manifest
 scripts/                    Developer and installation scripts (see scripts/README.md)
 docs/                       Product and architecture documentation (see docs/README.md)
 vendor/                     Vendored dependencies (whisper.cpp)
@@ -210,26 +188,23 @@ See [docs/README.md](docs/README.md) for the documentation index, including whic
 
 Key docs:
 - [docs/next_steps.md](docs/next_steps.md) — active product and engineering priorities
-- [docs/support_matrix.md](docs/support_matrix.md) — release validation and supported environments
-- [docs/holistic_review.md](docs/holistic_review.md) — current technical assessment
-- [docs/architecture.md](docs/architecture.md) — design rationale (historical; not the current implementation plan)
+- [docs/support_matrix.md](docs/support_matrix.md) — native package validation runbook and supported environments
 
 ## Current Implementation Status
 
-The current app and host workflow are Rust-native. The supported development path is the GTK app plus the `saywrite-host` daemon described above.
+The current supported runtime is native and in-process.
 
 Current state:
 - GTK app with onboarding, main dictation window, settings, and diagnostics
-- `saywrite-host` owns the real dictation workflow (D-Bus service, IBus bridge, GlobalShortcuts portal)
-- Host daemon lifecycle tied to GUI (starts on app launch, stops and is masked on close)
-- Global hotkey dictation works through the host path while SayWrite is running
+- The app owns the real dictation workflow, shortcut handling, and insertion orchestration on native builds
+- The app exposes a compatibility D-Bus interface so existing GNOME fallback launchers continue to work during migration
+- Global hotkey dictation works through the native app while SayWrite is running
 - Local (whisper.cpp) and cloud (OpenAI-compatible API) transcription both work end-to-end
 - Direct insertion works on the validated GNOME Wayland setup via IBus bridge
 - `wtype` (Wayland) and `xdotool` (X11) insertion paths exist but are untested on real hardware
 - Clipboard and notification fallbacks work on other environments
 - Desktop detection auto-selects the best insertion backend per session
-- In-app host installation with progress feedback
 - Shortcut capture dialog with GNOME keybinding suspend/restore
-- Host-side unit tests cover backend classification, result-kind mapping, IBus parsing, error sanitization, and toggle debounce
+- Unit tests cover backend classification, result-kind mapping, IBus parsing, error sanitization, and toggle debounce
 
-The next major milestone is cross-desktop validation and release polish so Direct Typing Mode can be documented with narrower, evidence-backed claims.
+The next major milestone is cross-desktop native validation: use the support matrix runbook to test the installed package on X11, KDE or wlroots Wayland, and one degraded fallback session. The validated direct-typing path remains GNOME Wayland until those rows pass.

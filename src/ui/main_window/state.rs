@@ -1,9 +1,9 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use gtk::{gdk, glib, Align, Orientation};
 use gtk::prelude::*;
+use gtk::{gdk, glib, Align, Orientation};
 
-use crate::host_api;
+use crate::integration_api;
 
 // ---------------------------------------------------------------------------
 // WaveformBox — animated listening indicator
@@ -178,7 +178,8 @@ impl MainWindowUi {
         self.setup_settings_btn.set_visible(false);
         self.setup_api_row.set_visible(false);
         if !*self.is_listening.borrow() {
-            self.dictate_btn.set_label("  Press Hotkey or Click to Start  ");
+            self.dictate_btn
+                .set_label("  Press Hotkey or Click to Start  ");
             self.dictate_btn.set_sensitive(true);
         }
     }
@@ -201,7 +202,8 @@ impl MainWindowUi {
             self.state_label.set_label("Transcript ready");
             self.dictate_btn.remove_css_class("destructive-action");
             self.dictate_btn.add_css_class("suggested-action");
-            self.dictate_btn.set_label("  Press Hotkey or Click to Start  ");
+            self.dictate_btn
+                .set_label("  Press Hotkey or Click to Start  ");
             self.dictate_btn.set_sensitive(true);
         }
         if starting {
@@ -214,28 +216,30 @@ impl MainWindowUi {
         self.spinner.stop();
         self.waveform.set_active(false);
         self.activity_revealer.set_reveal_child(false);
-        self.state_label.set_label(&super::friendly_error_message(error));
+        self.state_label
+            .set_label(&super::friendly_error_message(error));
         self.dictate_btn.remove_css_class("destructive-action");
         self.dictate_btn.add_css_class("suggested-action");
-        self.dictate_btn.set_label("  Press Hotkey or Click to Start  ");
+        self.dictate_btn
+            .set_label("  Press Hotkey or Click to Start  ");
         self.dictate_btn.set_sensitive(true);
     }
 
-    pub(crate) fn apply_host_disconnect(&self) {
+    pub(crate) fn apply_integration_disconnect(&self) {
         *self.is_listening.borrow_mut() = false;
         self.spinner.stop();
         self.waveform.set_active(false);
         self.activity_revealer.set_reveal_child(false);
-        self.state_label
-            .set_label("Host daemon unavailable");
+        self.state_label.set_label("Direct Typing unavailable");
         self.dictate_btn.remove_css_class("destructive-action");
         self.dictate_btn.add_css_class("suggested-action");
-        self.dictate_btn.set_label("  Press Hotkey or Click to Start  ");
+        self.dictate_btn
+            .set_label("  Press Hotkey or Click to Start  ");
         self.dictate_btn.set_sensitive(false);
         self.refresh_insertion_chip(None);
     }
 
-    pub(crate) fn apply_host_state(&self, state: &str) {
+    pub(crate) fn apply_integration_state(&self, state: &str) {
         match state {
             "listening" => {
                 *self.is_listening.borrow_mut() = true;
@@ -262,7 +266,8 @@ impl MainWindowUi {
                 self.activity_revealer.set_reveal_child(false);
                 self.dictate_btn.remove_css_class("destructive-action");
                 self.dictate_btn.add_css_class("suggested-action");
-                self.dictate_btn.set_label("  Press Hotkey or Click to Start  ");
+                self.dictate_btn
+                    .set_label("  Press Hotkey or Click to Start  ");
                 self.dictate_btn.set_sensitive(true);
                 self.state_label.set_label(if state == "done" {
                     "Transcript ready"
@@ -297,7 +302,7 @@ impl MainWindowUi {
         if ok {
             self.state_label.set_label(&format!(
                 "{}: {}",
-                host_api::insertion_result_label(result_kind),
+                integration_api::insertion_result_label(result_kind),
                 message
             ));
         } else {
@@ -323,16 +328,19 @@ impl MainWindowUi {
         }
     }
 
-    pub(crate) fn refresh_insertion_chip(&self, status: Option<crate::host_api::HostStatus>) {
+    pub(crate) fn refresh_insertion_chip(
+        &self,
+        status: Option<crate::integration_api::IntegrationStatus>,
+    ) {
         let (icon, label) = match status.as_ref() {
             Some(s) => match s.insertion_capability.as_str() {
-                host_api::INSERTION_CAPABILITY_TYPING => {
+                integration_api::INSERTION_CAPABILITY_TYPING => {
                     ("input-keyboard-symbolic", "Direct Typing")
                 }
-                host_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY => {
+                integration_api::INSERTION_CAPABILITY_CLIPBOARD_ONLY => {
                     ("edit-copy-symbolic", "Clipboard")
                 }
-                host_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY => {
+                integration_api::INSERTION_CAPABILITY_NOTIFICATION_ONLY => {
                     ("notification-symbolic", "Notification")
                 }
                 _ => ("help-browser-symbolic", "Unknown"),

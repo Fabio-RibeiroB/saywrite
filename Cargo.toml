@@ -4,6 +4,7 @@ version = "0.3.5"
 edition = "2021"
 license = "MIT"
 description = "Modern Linux dictation shell built with Rust, GTK4, and libadwaita."
+repository = "https://github.com/Fabio-RibeiroB/saywrite"
 
 [dependencies]
 libadwaita = { version = "0.6", package = "libadwaita", features = ["v1_4"] }
@@ -22,3 +23,26 @@ zbus = { version = "3.15", default-features = false, features = ["tokio"] }
 
 [build-dependencies]
 glib-build-tools = "0.19"
+
+[package.metadata.deb]
+maintainer = "Fabio Ribeiro"
+copyright = "2026 Fabio Ribeiro"
+depends = "$auto, ibus, libglib2.0-bin, systemd"
+section = "utility"
+priority = "optional"
+license-file = ["LICENSE", "0"]
+extended-description = """\
+SayWrite is a Linux dictation app with a GTK4/libadwaita interface, local or cloud
+transcription, and desktop-aware text delivery.
+.
+Direct typing is brought up by the app itself on native builds.
+.
+Direct typing is currently validated on GNOME Wayland via IBus. Clipboard Mode
+remains the fallback on unsupported or unvalidated environments."""
+assets = [
+    ["target/release/saywrite", "usr/bin/", "755"],
+    ["scripts/run-global-dictation.sh", "usr/bin/saywrite-dictation.sh", "755"],
+    ["data/io.github.fabio.SayWrite.desktop", "usr/share/applications/io.github.fabio.SayWrite.desktop", "644"],
+    ["data/io.github.fabio.SayWrite.svg", "usr/share/icons/hicolor/scalable/apps/io.github.fabio.SayWrite.svg", "644"],
+    ["data/io.github.fabio.SayWrite.appdata.xml", "usr/share/metainfo/io.github.fabio.SayWrite.metainfo.xml", "644"],
+]

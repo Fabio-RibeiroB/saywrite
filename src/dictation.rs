@@ -232,7 +232,7 @@ pub fn discover_whisper_cli() -> PathBuf {
         return PathBuf::from(path);
     }
 
-    // Check user-local install (placed there by install-host.sh).
+    // Check user-local installs first.
     let user_local = dirs::home_dir()
         .map(|h| h.join(".local/bin/whisper-cli"))
         .unwrap_or_else(|| PathBuf::from("whisper-cli"));
@@ -240,8 +240,6 @@ pub fn discover_whisper_cli() -> PathBuf {
     let candidates = [
         // User-local install — the primary path for installed deployments.
         user_local,
-        // Inside the Flatpak sandbox — accessible to the Flatpak app itself.
-        PathBuf::from("/app/bin/whisper-cli"),
         // Development source tree paths, baked in at compile time.
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("vendor/whisper.cpp/build/bin/whisper-cli"),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("vendor/whisper.cpp/build/bin/main"),
@@ -472,9 +470,7 @@ pub fn list_input_devices() -> Vec<AudioInputDevice> {
             if id.contains(".monitor") {
                 continue;
             }
-            let label = id
-                .replace("alsa_input.", "")
-                .replace(['_', '.'], " ");
+            let label = id.replace("alsa_input.", "").replace(['_', '.'], " ");
             devices.push(AudioInputDevice { id, label });
         }
     }

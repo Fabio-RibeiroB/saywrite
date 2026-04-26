@@ -1,14 +1,14 @@
 use std::{sync::Arc, time::Instant};
 
-use anyhow::Result;
-use saywrite::{
+use crate::{
     config::AppSettings,
     dictation::{self, DictationError},
-    host_api::{
-        HostStatus, INSERTION_RESULT_FAILED, STATE_DONE, STATE_IDLE, STATE_LISTENING,
+    integration_api::{
+        IntegrationStatus, INSERTION_RESULT_FAILED, STATE_DONE, STATE_IDLE, STATE_LISTENING,
         STATE_PROCESSING,
     },
 };
+use anyhow::Result;
 use tokio::sync::Mutex;
 
 use crate::{
@@ -25,11 +25,11 @@ struct SharedState {
 }
 
 #[derive(Clone)]
-pub struct HostService {
-    inner: Arc<HostServiceInner>,
+pub struct DictationService {
+    inner: Arc<DictationServiceInner>,
 }
 
-struct HostServiceInner {
+struct DictationServiceInner {
     state: Mutex<SharedState>,
     toggle_guard: Mutex<()>,
 }
@@ -42,9 +42,12 @@ pub struct InsertResponse {
 }
 
 #[derive(Debug, Clone)]
-pub enum HostSignalEvent {
+pub enum DictationEvent {
     StateChanged(String),
-    TextReady { cleaned_text: String, raw_text: String },
+    TextReady {
+        cleaned_text: String,
+        raw_text: String,
+    },
     InsertionResult(InsertResponse),
 }
 
@@ -52,20 +55,20 @@ pub enum HostSignalEvent {
 pub struct ToggleResponse {
     pub ok: bool,
     pub message: String,
-    pub events: Vec<HostSignalEvent>,
+    pub events: Vec<DictationEvent>,
 }
 
-impl HostService {
+impl DictationService {
     pub fn new() -> Result<Self> {
         let state = SharedState {
             dictation_state: STATE_IDLE.into(),
-            last_status: "Host daemon initialized.".into(),
+            last_status: "Native integration initialized.".into(),
             last_toggle_at: None,
             insertion: insertion::probe(),
         };
 
         Ok(Self {
-            inner: Arc::new(HostServiceInner {
+            inner: Arc::new(DictationServiceInner {
                 state: Mutex::new(state),
                 toggle_guard: Mutex::new(()),
             }),
@@ -76,13 +79,13 @@ impl HostService {
         input::probe(&AppSettings::load())
     }
 
-    pub async fn get_status(&self) -> HostStatus {
+    pub async fn get_status(&self) -> IntegrationStatus {
         let hotkey = input::probe(&AppSettings::load());
         let insertion = insertion::probe();
         let mut state = self.inner.state.lock().await;
         state.insertion = insertion.clone();
 
-        HostStatus {
+        IntegrationStatus {
             status: format!(
                 "{} [{} via {}]",
                 state.last_status, state.dictation_state, state.insertion.method
@@ -154,8 +157,8 @@ impl HostService {
                         ok: true,
                         message,
                         events: vec![
-                            HostSignalEvent::StateChanged(STATE_PROCESSING.into()),
-                            HostSignalEvent::StateChanged(STATE_LISTENING.into()),
+                            DictationEvent::StateChanged(STATE_PROCESSING.into()),
+                            DictationEvent::StateChanged(STATE_LISTENING.into()),
                         ],
                     }
                 }
@@ -167,8 +170,8 @@ impl HostService {
                         ok: false,
                         message: message.clone(),
                         events: vec![
-                            HostSignalEvent::StateChanged(STATE_PROCESSING.into()),
-                            HostSignalEvent::StateChanged(STATE_IDLE.into()),
+                            DictationEvent::StateChanged(STATE_PROCESSING.into()),
+                            DictationEvent::StateChanged(STATE_IDLE.into()),
                         ],
                     }
                 }
@@ -180,8 +183,8 @@ impl HostService {
                         ok: false,
                         message: message.clone(),
                         events: vec![
-                            HostSignalEvent::StateChanged(STATE_PROCESSING.into()),
-                            HostSignalEvent::StateChanged(STATE_IDLE.into()),
+                            DictationEvent::StateChanged(STATE_PROCESSING.into()),
+                            DictationEvent::StateChanged(STATE_IDLE.into()),
                         ],
                     }
                 }
@@ -212,13 +215,13 @@ impl HostService {
                         ok: insertion_result.ok,
                         message: insertion_result.message.clone(),
                         events: vec![
-                            HostSignalEvent::StateChanged(STATE_PROCESSING.into()),
-                            HostSignalEvent::TextReady {
+                            DictationEvent::StateChanged(STATE_PROCESSING.into()),
+                            DictationEvent::TextReady {
                                 cleaned_text,
                                 raw_text,
                             },
-                            HostSignalEvent::InsertionResult(insertion_result),
-                            HostSignalEvent::StateChanged(STATE_DONE.into()),
+                            DictationEvent::InsertionResult(insertion_result),
+                            DictationEvent::StateChanged(STATE_DONE.into()),
                         ],
                     }
                 }
@@ -230,8 +233,8 @@ impl HostService {
                         ok: false,
                         message: message.clone(),
                         events: vec![
-                            HostSignalEvent::StateChanged(STATE_PROCESSING.into()),
-                            HostSignalEvent::StateChanged(STATE_IDLE.into()),
+                            DictationEvent::StateChanged(STATE_PROCESSING.into()),
+                            DictationEvent::StateChanged(STATE_IDLE.into()),
                         ],
                     }
                 }
@@ -243,8 +246,8 @@ impl HostService {
                         ok: false,
                         message: message.clone(),
                         events: vec![
-                            HostSignalEvent::StateChanged(STATE_PROCESSING.into()),
-                            HostSignalEvent::StateChanged(STATE_IDLE.into()),
+                            DictationEvent::StateChanged(STATE_PROCESSING.into()),
+                            DictationEvent::StateChanged(STATE_IDLE.into()),
                         ],
                     }
                 }
@@ -286,9 +289,7 @@ impl HostService {
 pub(crate) fn sanitize_error(err: &anyhow::Error) -> (String, String) {
     if let Some(dictation_err) = err.downcast_ref::<DictationError>() {
         let message = match dictation_err {
-            DictationError::WhisperCliNotFound => {
-                "whisper.cpp is not installed for the host daemon yet.".into()
-            }
+            DictationError::WhisperCliNotFound => "whisper.cpp is not installed yet.".into(),
             DictationError::NoLocalModel => "No local model is installed yet.".into(),
             DictationError::NoAudioCaptured => "The microphone did not produce any audio.".into(),
             DictationError::MissingRuntimeDir => {
@@ -300,14 +301,14 @@ pub(crate) fn sanitize_error(err: &anyhow::Error) -> (String, String) {
 
     (
         INSERTION_RESULT_FAILED.into(),
-        "The host daemon hit an unexpected error.".into(),
+        "SayWrite hit an unexpected error.".into(),
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use saywrite::dictation::DictationError;
+    use crate::dictation::DictationError;
 
     #[test]
     fn sanitize_whisper_not_found() {
@@ -376,7 +377,7 @@ mod tests {
 
     #[tokio::test]
     async fn debounce_passes_first_toggle_and_rejects_immediate_repeat() {
-        let service = HostService::new().expect("HostService::new");
+        let service = DictationService::new().expect("DictationService::new");
 
         let first = service.reject_if_repeated_toggle().await;
         assert!(
@@ -385,10 +386,7 @@ mod tests {
         );
 
         let second = service.reject_if_repeated_toggle().await;
-        assert!(
-            second.is_some(),
-            "immediate repeat should be debounced"
-        );
+        assert!(second.is_some(), "immediate repeat should be debounced");
         let msg = second.unwrap();
         assert!(
             msg.contains("shortcut") || msg.contains("repeated"),
@@ -400,7 +398,7 @@ mod tests {
     async fn debounce_allows_toggle_after_cooldown() {
         use std::time::Duration;
 
-        let service = HostService::new().expect("HostService::new");
+        let service = DictationService::new().expect("DictationService::new");
 
         service.reject_if_repeated_toggle().await;
         // Wait out the 900ms debounce window

@@ -31,8 +31,17 @@ pub fn present(app: &adw::Application, settings: Rc<RefCell<AppSettings>>) {
     insertion_chip.set_tooltip_text(Some("Insertion mode"));
 
     let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&widgets::build_header(&stack, settings.clone(), &insertion_chip));
-    toolbar.set_content(Some(&widgets::build_body(&window, &stack, settings.clone(), insertion_chip)));
+    toolbar.add_top_bar(&widgets::build_header(
+        &stack,
+        settings.clone(),
+        &insertion_chip,
+    ));
+    toolbar.set_content(Some(&widgets::build_body(
+        &window,
+        &stack,
+        settings.clone(),
+        insertion_chip,
+    )));
     stack.add_named(&toolbar, Some("main"));
 
     let settings_page = preferences::build_inline_page(
@@ -71,10 +80,10 @@ pub fn present(app: &adw::Application, settings: Rc<RefCell<AppSettings>>) {
 
 fn friendly_error_message(error: &str) -> String {
     if error.contains("unexpected error") {
-        return "Something went wrong while talking to the host companion.".into();
+        return "Something went wrong while handling direct typing.".into();
     }
-    if error.contains("Host integration is not running") || error.contains("host companion") {
-        return "The host companion is not available right now.".into();
+    if error.contains("native integration is not running") {
+        return "Direct typing is not available right now.".into();
     }
     if error.contains("No dictation session is running") {
         return "There is no active dictation to stop.".into();

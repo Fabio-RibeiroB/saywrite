@@ -1,29 +1,34 @@
 # SayWrite Next Steps
 
-SayWrite has crossed the main technical hurdle: hotkey-driven dictation, cleanup, and direct insertion now work on a real GNOME Wayland machine through the host daemon and IBus bridge.
+SayWrite has crossed the main technical hurdle: hotkey-driven dictation, cleanup, and direct insertion now work on a real GNOME Wayland machine through the in-process native runtime and IBus bridge.
 
-The next phase is simplifying distribution and reducing architectural complexity by moving from Flatpak-first to `.deb`-first, targeting Ubuntu/Debian-based distros.
+The current phase is **cross-desktop native validation**: prove the packaged `.deb` app on X11, non-GNOME Wayland, and degraded fallback sessions before broadening release claims.
 
 ## Current State
 
 - The GTK app exists with onboarding, main dictation window, settings, diagnostics, and shortcut capture.
-- `saywrite-host` owns the real dictation workflow (D-Bus service, IBus bridge, GlobalShortcuts portal).
-- Global hotkey dictation works through the host path while SayWrite is running.
+- The app now owns the real dictation workflow on native builds.
+- Global hotkey dictation works through the direct-typing controller while SayWrite is running.
 - Local (whisper.cpp) transcription works end to end.
 - Cloud transcription works with OpenAI-compatible APIs.
-- Direct insertion works on the currently validated GNOME Wayland setup via IBus bridge.
+- Direct insertion works on the currently validated GNOME Wayland setup via IBus bridge, including browser textarea, GTK Text Editor, VS Code, terminal/chat input, and repeatability checks.
 - `wtype` (Wayland) and `xdotool` (X11) insertion paths exist but are untested on real hardware.
 - Clipboard and notification fallbacks exist for degraded environments.
-- Host daemon lifecycle is tied to the GUI (starts on app launch, stops and is masked on close).
-- `saywrite-host` refuses to start unless the app owns its D-Bus name, preventing orphan daemons.
+- The app exposes a compatibility D-Bus interface so existing GNOME fallback launchers still work during migration.
 - Shortcut capture dialog temporarily suspends the active GNOME keybinding so all key combos can be captured.
-- Shortcut changes from within Flatpak update GNOME keybindings directly via `flatpak-spawn --host gsettings`.
-- In-app host installation with progress feedback (builds release binary if needed).
+- Shortcut changes update GNOME keybindings directly through native `gsettings` calls.
 - Desktop detection auto-selects the best insertion backend per session (GNOME Wayland, Other Wayland, X11, Other).
 - Insertion capability and result kinds are explicit: `typing`/`clipboard-only`/`notification-only`/`unavailable` and `typed`/`copied`/`notified`/`failed`.
-- Host-side toggle debounce (900ms) prevents repeated shortcut activations from wedging the daemon.
+- Toggle debounce (900ms) prevents repeated shortcut activations from wedging dictation state.
 - Error sanitization maps typed `DictationError` variants to user-friendly messages.
-- Host-side unit tests cover backend classification, result-kind mapping, IBus parsing, error sanitization, and toggle debounce.
+- Integration tests cover backend classification, result-kind mapping, IBus parsing, error sanitization, and toggle debounce.
+- The old `docs/architecture.md`, `docs/holistic_review.md`, `docs/implementation_plan.md`, and `docs/ship_todo.md` files have been removed because they no longer reflect the current branch state.
+- The standalone `saywrite-host` binary target, user systemd service, D-Bus activation file, and host installer script have been removed from the native path.
+- The primary runtime modules now use native integration naming: `native_integration.rs`, `integration_api.rs`, and `desktop_setup.rs`.
+- Native package smoke validation on April 24, 2026 confirmed that `/usr/bin/saywrite` owns `io.github.saywrite.Host`, reports Direct Typing as `typing` via the IBus backend, and treats the GNOME fallback shortcut as an active hotkey path.
+- GNOME Wayland app-matrix validation on April 26, 2026 confirmed Direct Typing in Brave, GNOME Text Editor, VS Code, and terminal/chat input; Qt remains untested on the current machine because no Qt text editor is installed.
+- Startup migration now removes stale user-local `saywrite-host` artifacts left by older Flatpak-era installs: the user systemd service, D-Bus activation file, and `~/.local/bin/saywrite-host`.
+- `docs/support_matrix.md` now contains the native validation runbook for moving X11, KDE/wlroots Wayland, and degraded fallback rows out of `Untested`.
 
 ## Migration: Flatpak → `.deb`-First
 
@@ -55,8 +60,8 @@ A native `.deb` removes the sandbox boundary entirely. The app runs directly on 
 | XDG portal or `gsettings` for shortcuts | `libkeybinder` or direct D-Bus |
 | Host install flow in Settings | No install flow needed |
 | Host lifecycle management in `app.rs` | Gone |
-| `host_setup.rs` desktop detection | Still useful, but simpler |
-| `host_integration.rs` D-Bus client | Direct D-Bus or IBus calls |
+| `desktop_setup.rs` desktop detection | Still useful, but simpler |
+| `native_integration.rs` D-Bus client | Direct D-Bus or IBus calls |
 | `insertion.rs` in host daemon | Moved into the app |
 | `input.rs` in host daemon | Moved into the app |
 
@@ -80,11 +85,11 @@ A native `.deb` removes the sandbox boundary entirely. The app runs directly on 
 
 ### Migration Path
 
-1. **Phase 1: `.deb` alongside Flatpak** — Build a `.deb` with `cargo-deb`. Keep the Flatpak. Use the `.deb` for dogfeeding and faster iteration.
+1. **Phase 1: `.deb` first** — Build and validate a native `.deb` with `cargo-deb`. Treat Flatpak as legacy context only while the native path finishes stabilising.
 2. **Phase 2: Merge host into app** — Move `insertion.rs`, `input.rs`, and D-Bus service logic into the main app. Remove `saywrite-host` binary.
-3. **Phase 3: Remove Flatpak-specific code** — Strip `flatpak-spawn`, host lifecycle, D-Bus IPC client. Simplify `app.rs`, `host_setup.rs`, `host_integration.rs`.
+3. **Phase 3: Remove Flatpak-specific code** — Strip `flatpak-spawn`, host lifecycle, D-Bus IPC client. Simplify `app.rs`, `desktop_setup.rs`, `native_integration.rs`.
 4. **Phase 4: PPA (optional)** — Set up a Launchpad PPA for automatic `apt` updates once the product stabilizes.
-5. **Phase 5: Flatpak as optional** — Keep Flatpak for users who want sandboxing, but it's no longer the primary distribution channel.
+5. **Phase 5: Release infrastructure** — Publish native `.deb` artifacts first; revisit PPAs or other update channels after the product stabilizes.
 
 ## Cross-Desktop Compatibility
 
@@ -93,7 +98,7 @@ The goal: any Ubuntu/Debian user should get working dictation with minimal frict
 ### Global Shortcut
 
 Currently the global hotkey relies on:
-1. XDG GlobalShortcuts portal (registered by `saywrite-host` at startup)
+1. XDG GlobalShortcuts portal (registered by the app at startup)
 2. GNOME custom keybindings via `gsettings`
 
 **After migration:**
@@ -112,7 +117,7 @@ Currently the global hotkey relies on:
 
 ### Detection and Honest Reporting
 
-- Auto-detect the desktop environment and session type at startup ✅ (implemented in `host_setup.rs`)
+- Auto-detect the desktop environment and session type at startup ✅ (implemented in `desktop_setup.rs`)
 - Report the actual insertion method in the UI ✅ (implemented via capability labels)
 - Don't show GNOME-specific setup steps on KDE or other desktops — needs audit
 - Tailor onboarding copy to the detected environment — needs work
@@ -133,25 +138,25 @@ The key UX goal is that users experience one product, not "app plus helper".
 
 ## Completed Milestones
 
-### Package the Host Companion Cleanly ✅
-- In-app installation via `host_setup::install_host_companion()` works end-to-end
-- Settings shows Clipboard Mode vs Direct Typing clearly
-- Host daemon lifecycle tied to GUI (starts on launch, stops and is masked on close)
-- Host refuses to start without app D-Bus name ownership
+### Package the Native Build ✅
+- Native `.deb` packaging is wired up with `cargo-deb`
+- The installed package matches the current in-process runtime
+- Support docs now point at the native release path instead of Flatpak-first setup
+- Rebuilt and reinstalled `target/debian/saywrite_0.3.5-1_amd64.deb` on April 24, 2026; package contents contain `saywrite`, `saywrite-dictation.sh`, desktop metadata, icon, metainfo, and no `saywrite-host` service assets
 
 ### Harden the IBus Path ✅
 - Fixed race condition, added retry logic, comprehensive logging
 - Engine swap/restore with 120ms delay and retry on failure
-- Repeated dictation reliable without daemon restart
+- Repeated dictation reliable without restarting the app
 
 ### Capability Reporting ✅
 - Runtime probing complete: GPU detection, whisper.cpp discovery, local model check
 - Diagnostics page shows insertion backend and hotkey status
-- Onboarding shows real mode from host_status
+- Onboarding shows the real Direct Typing mode from the native integration status
 - Explicit capability states: `typing`, `clipboard-only`, `notification-only`, `unavailable`
 - Explicit result kinds: `typed`, `copied`, `notified`, `failed`
 
-### Host Regression Tests ✅
+### Integration Regression Tests ✅
 - Backend classification, result-kind mapping, IBus parsing
 - Service error sanitization + debounce tests
 
@@ -159,27 +164,192 @@ The key UX goal is that users experience one product, not "app plus helper".
 - WaveformBox, Revealers, inline setup actions, insertion chip
 - Shortcut capture with GNOME keybinding suspend/restore
 - Onboarding shortcut page with explicit Change button
-- Settings sync from Flatpak to host via `flatpak-spawn --host`
 
 ### Desktop Detection ✅
-- `host_setup.rs` detects GNOME Wayland, Other Wayland, X11, Other
+- `desktop_setup.rs` detects GNOME Wayland, Other Wayland, X11, Other
 - Per-profile dependency checks with Ubuntu/Zorin package hints
-- Diagnostics show desktop label, host files status, and dependency status
+- Diagnostics show desktop label, native runtime status, and dependency status
+- GNOME fallback shortcut detection is counted as an active hotkey path when the XDG GlobalShortcuts portal is unavailable
+
+### Remove Flatpak Assumptions ✅
+- Flatpak-specific runtime behaviour has been removed from the native path
+- The old Flatpak manifest and migration-era planning docs have been deleted
+- The `saywrite-host` binary target, user service activation files, and host installer script have been deleted
+- Native startup cleans stale user-local host companion files from previous installs so the app can own the compatibility D-Bus name
+
+### Simplify Native Integration Naming ✅
+- `host_api.rs` became `integration_api.rs`
+- `host_integration.rs` became `native_integration.rs`
+- `host_setup.rs` became `desktop_setup.rs`
+- Internal types now use integration/dictation naming instead of host-service naming
+- The legacy `io.github.saywrite.Host` D-Bus identifiers remain only as the temporary compatibility surface for GNOME fallback launchers
+
+### Tauri Note
+
+There is an exploratory Tauri sketch in `.opencode/plans/tauri_migration_plan.md`, but it is not the active implementation plan. It needs to be rewritten around the current native runtime before it becomes actionable.
 
 ## Release Priorities
 
+Slices 1-3 plus the v0.5 native naming cleanup are complete:
+
+- `.deb` packaging is wired up with `cargo-deb`
+- the direct-typing runtime has been pulled into the app
+- Flatpak-specific runtime behavior has been removed from the native path
+- the installed package has been validated after removing the old daemon target
+- remaining host-era module names and UI/runtime API names have been simplified around the native in-process controller
+- the current GNOME Wayland row has passed available app-matrix and repeatability checks, with only the Qt app target still pending locally
+
+The next major work is native validation outside the current GNOME Wayland machine. Follow `docs/support_matrix.md` and validate in this order:
+
+1. X11 with `xdotool`
+2. KDE Plasma Wayland with `wtype` and the XDG GlobalShortcuts portal
+3. wlroots Wayland with `wtype`
+4. an intentionally degraded Wayland session where Clipboard Mode is the clear fallback
+
+The only remaining local GNOME Wayland matrix target is a Qt text editor such as Kate. It should be recorded when available, but it does not block starting X11 validation.
+
+While testing, audit onboarding, Settings, diagnostics, and setup copy so GNOME-specific guidance only appears on GNOME sessions.
+
+## Native Package Refactor Map
+
+The native packaging and architecture migration is the primary runtime model. The goal is to ship the Debian-first path without carrying two long-term app/host distribution models.
+
+### Target Shape
+
+- Primary distribution: native `.deb` for Ubuntu/Zorin first
+- Primary runtime: single native GTK app process
+- No Flatpak-first assumptions in the main code path
+- No required `saywrite-host` companion for the Debian build
+- Keep direct typing honest: supported where validated, degraded where not
+
+### Refactor Slices
+
+#### Slice 1: Native packaging without changing behavior
+
+Goal: ship a `.deb` quickly so day-to-day dogfooding stops depending on Flatpak.
+
+Files/modules affected:
+
+- [Cargo.toml](/home/fabio/Documents/GitHub/saywrite/Cargo.toml): add `cargo-deb` metadata
+- [README.md](/home/fabio/Documents/GitHub/saywrite/README.md): make `.deb` the primary install path
+- [data/io.github.fabio.SayWrite.appdata.xml](/home/fabio/Documents/GitHub/saywrite/data/io.github.fabio.SayWrite.appdata.xml): release messaging for `.deb`
+- host installer script: deleted after the native app took ownership of direct typing
+
+Deliverable:
+
+- a native `.deb` that installs the current app cleanly on Ubuntu/Zorin
+- Flatpak is no longer the supported user install path
+
+#### Slice 2: Pull host logic into the app
+
+Goal: remove the artificial app/host boundary from the Debian build.
+
+Source modules absorbed:
+
+- [src/input.rs](/home/fabio/Documents/GitHub/saywrite/src/input.rs)
+- [src/insertion.rs](/home/fabio/Documents/GitHub/saywrite/src/insertion.rs)
+- [src/service.rs](/home/fabio/Documents/GitHub/saywrite/src/service.rs)
+
+Deleted standalone daemon code:
+
+- `src/bin/saywrite-host/dbus.rs`
+- `src/bin/saywrite-host/main.rs`
+
+Compatibility code still present:
+
+- [src/native_integration.rs](/home/fabio/Documents/GitHub/saywrite/src/native_integration.rs): in-process direct-typing integration and compatibility D-Bus adapter
+- [src/integration_api.rs](/home/fabio/Documents/GitHub/saywrite/src/integration_api.rs): runtime status/result vocabulary plus legacy compatibility constants
+
+Implementation direction:
+
+- create an in-process integration controller in the main app
+- keep capability/result enums for diagnostics and the temporary compatibility interface
+- replace app-internal D-Bus signal subscription with direct event delivery
+- keep desktop-specific insertion backends; only remove the transport boundary
+
+#### Slice 3: Remove Flatpak-specific runtime behavior
+
+Goal: stop designing the app around the sandbox.
+
+Files/modules affected:
+
+- [src/app.rs](/home/fabio/Documents/GitHub/saywrite/src/app.rs): remove `systemctl` start/stop/mask lifecycle
+- [src/config.rs](/home/fabio/Documents/GitHub/saywrite/src/config.rs): remove Flatpak settings sync and install-id assumptions
+- [src/desktop_setup.rs](/home/fabio/Documents/GitHub/saywrite/src/desktop_setup.rs): remove install flow, old companion path probing, and `flatpak-spawn --host`
+- Flatpak manifest: removed from the active distribution path
+- legacy user-local host cleanup: implemented at startup for old `saywrite-host` user service, D-Bus activation file, and `~/.local/bin/saywrite-host`
+
+What stays:
+
+- desktop/session detection
+- dependency detection and package hints
+- GNOME shortcut self-heal logic, but using native calls only
+
+#### Slice 4: Simplify UI copy and setup flows
+
+Goal: remove product language that only exists because of Flatpak.
+
+Files/modules affected:
+
+- [src/ui/preferences.rs](/home/fabio/Documents/GitHub/saywrite/src/ui/preferences.rs)
+- [src/ui/onboarding.rs](/home/fabio/Documents/GitHub/saywrite/src/ui/onboarding.rs)
+- [src/runtime.rs](/home/fabio/Documents/GitHub/saywrite/src/runtime.rs)
+- [src/ui/main_window/widgets.rs](/home/fabio/Documents/GitHub/saywrite/src/ui/main_window/widgets.rs)
+
+Changes:
+
+- remove "install host companion" actions from Settings
+- replace "host daemon" wording with native direct-typing diagnostics
+- keep Clipboard Mode vs Direct Typing Mode as the user-facing model
+- show backend-specific limitations without mentioning sandbox internals
+
+#### Slice 5: Delete the old architecture
+
+Goal: make the native path the only primary architecture.
+
+Removed from the native path:
+
+- `saywrite-host` binary target
+- user systemd service and D-Bus activation files in `data/`
+- host install scripts that only exist for Flatpak
+- `flatpak-spawn --host` code paths
+
+Still to audit:
+
+- Flatpak-first documentation
+
+### Sequence
+
+1. Add `.deb` packaging so dogfooding moves off Flatpak immediately.
+2. Introduce an in-process integration controller and port host logic into it.
+3. Switch UI/runtime code from `host_*` APIs to the native controller. ✅
+4. Remove the app-managed host lifecycle and install flow.
+5. Delete the obsolete daemon, D-Bus, and Flatpak-specific files.
+6. Re-run support-matrix validation on native builds before calling the migration done.
+
+### Guardrails
+
+- Do not promise universal Linux support just because the sandbox is gone.
+- Keep GNOME Wayland as the primary validated path until X11/KDE/wlroots are actually tested.
+- Preserve Clipboard Mode as the safe fallback.
+- Avoid a second long-lived architecture; native `.deb` remains primary and Flatpak is removed from the supported user path.
+
 ### v0.4 — `.deb` Packaging
-1. Set up `cargo-deb` for `.deb` builds
-2. Publish `.deb` alongside Flatpak on GitHub releases
-3. Validate `.deb` install on Ubuntu 24.04
-4. Use `.deb` for dogfeeding (faster iteration, no stale cache)
+1. Publish a Debian dev package for Ubuntu/Zorin dogfooding ✅
+2. Validate native install on Ubuntu 24.04 or Zorin OS ✅
+3. Make `.deb` the primary internal testing path ✅
 
 ### v0.5 — Merge Host Into App
-1. Move `insertion.rs` and `input.rs` from host daemon into the app
-2. Replace D-Bus IPC with direct function calls
-3. Remove `saywrite-host` binary and systemd service
-4. Simplify `app.rs` (no host lifecycle), `host_integration.rs` (no D-Bus client), `host_setup.rs` (no install flow)
-5. Keep Flatpak as optional for sandbox users
+1. Remove `saywrite-host` binary and systemd service from the supported native path ✅
+2. Delete migration-era stale copy from the active native path ✅
+3. Simplify `integration_api.rs`, `native_integration.rs`, and related package assets while keeping the temporary compatibility D-Bus surface ✅
+
+### v0.6 — Cross-Desktop Native Validation
+1. Validate X11 Direct Typing with the installed `.deb`
+2. Validate KDE Plasma Wayland Direct Typing and shortcut behavior with the installed `.deb`
+3. Validate one wlroots Wayland session with the installed `.deb`
+4. Verify one degraded fallback path where Clipboard Mode is clearly reported
+5. Update README support claims only for rows that pass the support matrix
 
 ### v1.0 — Polish and PPA
 1. PPA setup for automatic `apt` updates
@@ -187,7 +357,12 @@ The key UX goal is that users experience one product, not "app plus helper".
 3. Custom vocabulary and context hints
 4. Move UI away from substring error matching toward typed error handling
 5. Consolidate async state model (timer polling → event-driven)
-6. Cross-desktop validation on non-GNOME setups
+
+### Doc Hygiene
+
+- Keep `next_steps.md` as the active plan.
+- Keep `support_matrix.md` as the release truth table.
+- Do not reintroduce removed planning docs unless they again become current source of truth.
 
 ## Non-Blocking
 

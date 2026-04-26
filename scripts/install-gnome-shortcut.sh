@@ -4,9 +4,8 @@ set -euo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HANDS_FREE_PATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/saywrite-hands-free/"
-# Prefer the host-installed launcher (deployed by scripts/install-host.sh)
-# so the command path works for Flatpak users. Fall back to the repo script
-# only in dev checkouts where the host companion hasn't been installed yet.
+# Prefer the package-installed launcher when available. Fall back to the repo
+# script for development checkouts.
 if [[ -x "${HOME}/.local/bin/saywrite-dictation.sh" ]]; then
   HANDS_FREE_COMMAND="${HOME}/.local/bin/saywrite-dictation.sh"
 else

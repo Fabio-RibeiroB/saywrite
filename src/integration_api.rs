@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
-pub const BUS_NAME: &str = "io.github.saywrite.Host";
-pub const OBJECT_PATH: &str = "/io/github/saywrite/Host";
-pub const INTERFACE_NAME: &str = "io.github.saywrite.Host";
+pub const COMPAT_BUS_NAME: &str = "io.github.saywrite.Host";
+pub const COMPAT_OBJECT_PATH: &str = "/io/github/saywrite/Host";
+pub const COMPAT_INTERFACE_NAME: &str = "io.github.saywrite.Host";
 
 pub const STATE_IDLE: &str = "idle";
 pub const STATE_LISTENING: &str = "listening";
@@ -20,7 +20,7 @@ pub const INSERTION_RESULT_NOTIFIED: &str = "notified";
 pub const INSERTION_RESULT_FAILED: &str = "failed";
 
 #[derive(Debug, Clone)]
-pub struct HostStatus {
+pub struct IntegrationStatus {
     pub status: String,
     pub hotkey_active: bool,
     pub insertion_available: bool,

@@ -1,10 +1,10 @@
 use libadwaita as adw;
-use std::{cell::RefCell, path::Path, process::Command, rc::Rc, thread};
+use std::{cell::RefCell, rc::Rc, thread};
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
-use crate::{config::AppSettings, host_setup, ui};
+use crate::{config::AppSettings, desktop_setup, native_integration, ui};
 
 pub const APP_ID: &str = "io.github.fabio.SayWrite";
 
@@ -18,10 +18,7 @@ pub fn run() -> glib::ExitCode {
 
     app.connect_startup(|_| {
         load_css();
-        start_host_daemon();
-    });
-    app.connect_shutdown(|_| {
-        stop_host_daemon();
+        start_native_integration();
     });
     app.connect_activate(activate);
     app.run()
@@ -55,40 +52,13 @@ fn load_css() {
     );
 }
 
-fn start_host_daemon() {
-    run_user_systemctl(&["unmask", "saywrite-host.service"]);
-    run_user_systemctl(&["start", "saywrite-host.service"]);
-
+fn start_native_integration() {
+    desktop_setup::cleanup_legacy_host_companion();
+    native_integration::start_background_integration();
     thread::spawn(|| {
-        // Self-heal the GNOME hands-free keybinding on every launch: on
-        // fresh Flatpak installs nothing else sets the command path, and
-        // previous versions could leave the binding field empty after a
-        // cancelled capture. Cheap (a couple of gsettings calls) and
-        // idempotent when the keybinding is already correct.
         let label = AppSettings::load().global_shortcut_label;
-        host_setup::self_heal_gnome_shortcut(&label);
+        desktop_setup::self_heal_gnome_shortcut(&label);
     });
-}
-
-fn stop_host_daemon() {
-    run_user_systemctl(&["stop", "saywrite-host.service"]);
-    run_user_systemctl(&["mask", "saywrite-host.service"]);
-}
-
-fn run_user_systemctl(args: &[&str]) {
-    let status = if inside_flatpak() {
-        Command::new("flatpak-spawn")
-            .args(["--host", "systemctl", "--user"])
-            .args(args)
-            .status()
-    } else {
-        Command::new("systemctl").arg("--user").args(args).status()
-    };
-    let _ = status;
-}
-
-fn inside_flatpak() -> bool {
-    Path::new("/.flatpak-info").exists()
 }
 
 fn register_resources() {

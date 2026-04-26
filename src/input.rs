@@ -10,8 +10,8 @@ use std::{
     time::Duration,
 };
 
+use crate::config::AppSettings;
 use anyhow::{anyhow, Context, Result};
-use saywrite::config::AppSettings;
 use tokio::{
     sync::{oneshot, Mutex},
     time::timeout,
@@ -482,12 +482,10 @@ fn serialize_component() -> OwnedValue {
     let props: HashMap<String, OwnedValue> = HashMap::new();
     let observed_paths: Vec<OwnedValue> = Vec::new();
     let engines = vec![serialize_engine_desc()];
-    let command_line = format!(
-        "{}/.local/bin/saywrite-host --ibus-engine",
-        dirs::home_dir()
-            .and_then(|p| p.to_str().map(ToOwned::to_owned))
-            .unwrap_or_else(|| "~".into())
-    );
+    let command_line = env::current_exe()
+        .ok()
+        .and_then(|path| path.to_str().map(ToOwned::to_owned))
+        .unwrap_or_else(|| "saywrite".into());
     let structure = StructureBuilder::new()
         .add_field("IBusComponent")
         .add_field(props)
@@ -587,14 +585,18 @@ mod tests {
 
     #[test]
     fn parses_outputs_with_extra_whitespace() {
-        let object_output = "  random prefix (objectpath '/org/freedesktop/IBus/InputContext_42',)  ";
+        let object_output =
+            "  random prefix (objectpath '/org/freedesktop/IBus/InputContext_42',)  ";
         let engine_output =
             "  (< 'IBusEngineDesc', {},   'xkb:gb::eng', 'English (UK)', '', 'en_GB', '', '', '', uint32 0, '', '', '', '', '', '', '', ''>,)  ";
         assert_eq!(
             parse_object_path(object_output).as_deref(),
             Some("/org/freedesktop/IBus/InputContext_42")
         );
-        assert_eq!(parse_engine_name(engine_output).as_deref(), Some("xkb:gb::eng"));
+        assert_eq!(
+            parse_engine_name(engine_output).as_deref(),
+            Some("xkb:gb::eng")
+        );
     }
 
     #[test]
@@ -630,6 +632,7 @@ mod tests {
 
 static PORTAL_ACTIVE: AtomicBool = AtomicBool::new(false);
 const TOGGLE_SHORTCUT_ID: &str = "toggle-dictation";
+static TOGGLE_HANDLER: OnceLock<Arc<dyn Fn() + Send + Sync>> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct HotkeyStatus {
@@ -661,6 +664,14 @@ pub fn probe(settings: &AppSettings) -> HotkeyStatus {
     }
 
     if gnome_desktop() {
+        if gnome_shortcut_active(&shortcut) {
+            return HotkeyStatus {
+                active: true,
+                message: format!("GNOME shortcut fallback active for {}.", shortcut),
+                setup_hint: String::new(),
+            };
+        }
+
         return HotkeyStatus {
             active: false,
             message: format!(
@@ -681,9 +692,75 @@ pub fn probe(settings: &AppSettings) -> HotkeyStatus {
     }
 }
 
+fn gnome_shortcut_active(shortcut: &str) -> bool {
+    let command = gsettings_get(
+        "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/saywrite-hands-free/",
+        "command",
+    );
+    let binding = gsettings_get(
+        "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/saywrite-hands-free/",
+        "binding",
+    );
+
+    let Some(command) = command else {
+        return false;
+    };
+    let Some(binding) = binding else {
+        return false;
+    };
+
+    let command_ready = command == "/usr/bin/saywrite-dictation.sh"
+        || command.ends_with("/scripts/run-global-dictation.sh");
+    command_ready && binding == shortcut_to_gnome_binding(shortcut)
+}
+
+fn gsettings_get(schema_key: &str, field: &str) -> Option<String> {
+    let output = Command::new("gsettings")
+        .args(["get", schema_key, field])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    Some(
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .trim_matches('\'')
+            .to_string(),
+    )
+}
+
+fn shortcut_to_gnome_binding(label: &str) -> String {
+    let mut modifiers = String::new();
+    let mut key = String::new();
+
+    for part in label.split('+') {
+        match part.trim().to_ascii_lowercase().as_str() {
+            "super" => modifiers.push_str("<Super>"),
+            "ctrl" | "control" => modifiers.push_str("<Primary>"),
+            "alt" => modifiers.push_str("<Alt>"),
+            "shift" => modifiers.push_str("<Shift>"),
+            other if !other.is_empty() => key = other.to_string(),
+            _ => {}
+        }
+    }
+
+    if key.is_empty() {
+        key = "d".into();
+    }
+
+    format!("{modifiers}{key}")
+}
+
+#[allow(dead_code)]
+pub fn set_toggle_handler(handler: Arc<dyn Fn() + Send + Sync>) {
+    let _ = TOGGLE_HANDLER.set(handler);
+}
+
 /// Register a global shortcut via the XDG GlobalShortcuts portal and listen
-/// for activations. On each activation, calls ToggleDictation on the host
-/// D-Bus interface.
+/// for activations. On each activation, toggles the in-process dictation
+/// controller. The D-Bus fallback is kept only for legacy launcher commands.
 pub async fn register_and_listen() -> Result<()> {
     let conn = Connection::session()
         .await
@@ -756,7 +833,11 @@ pub async fn register_and_listen() -> Result<()> {
             }
 
             eprintln!("GlobalShortcuts: activation received, toggling dictation");
-            toggle_dictation_via_dbus(&conn).await;
+            if let Some(handler) = TOGGLE_HANDLER.get() {
+                handler();
+            } else {
+                toggle_dictation_via_compat_dbus(&conn).await;
+            }
         }
     }
 
@@ -772,7 +853,9 @@ fn portal_request_path(conn: &Connection, token: &str) -> Result<String> {
         .replace('.', "_")
         .trim_start_matches(':')
         .to_string();
-    Ok(format!("/org/freedesktop/portal/desktop/request/{unique_name}/{token}"))
+    Ok(format!(
+        "/org/freedesktop/portal/desktop/request/{unique_name}/{token}"
+    ))
 }
 
 async fn create_session(conn: &Connection, portal: &Proxy<'_>) -> Result<ObjectPath<'static>> {
@@ -896,18 +979,18 @@ async fn wait_for_response(
     }
 }
 
-async fn toggle_dictation_via_dbus(conn: &Connection) {
+async fn toggle_dictation_via_compat_dbus(conn: &Connection) {
     let proxy = match Proxy::new(
         conn,
-        saywrite::host_api::BUS_NAME,
-        saywrite::host_api::OBJECT_PATH,
-        saywrite::host_api::INTERFACE_NAME,
+        crate::integration_api::COMPAT_BUS_NAME,
+        crate::integration_api::COMPAT_OBJECT_PATH,
+        crate::integration_api::COMPAT_INTERFACE_NAME,
     )
     .await
     {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("Failed to create host proxy for toggle: {e}");
+            eprintln!("Failed to create compatibility proxy for toggle: {e}");
             return;
         }
     };
@@ -920,9 +1003,18 @@ async fn toggle_dictation_via_dbus(conn: &Connection) {
 
 fn portal_interface_available() -> bool {
     Command::new("busctl")
-        .args(["--user", "introspect", "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop"])
+        .args([
+            "--user",
+            "introspect",
+            "org.freedesktop.portal.Desktop",
+            "/org/freedesktop/portal/desktop",
+        ])
         .output()
-        .map(|r| r.status.success() && String::from_utf8_lossy(&r.stdout).contains("org.freedesktop.portal.GlobalShortcuts"))
+        .map(|r| {
+            r.status.success()
+                && String::from_utf8_lossy(&r.stdout)
+                    .contains("org.freedesktop.portal.GlobalShortcuts")
+        })
         .unwrap_or(false)
 }
 

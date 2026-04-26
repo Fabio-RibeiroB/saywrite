@@ -1,8 +1,11 @@
 pub mod cleanup;
 pub mod config;
+pub mod desktop_setup;
 pub mod dictation;
-pub mod host_api;
-pub mod host_integration;
-pub mod host_setup;
+pub mod input;
+pub mod insertion;
+pub mod integration_api;
 pub mod model_installer;
+pub mod native_integration;
 pub mod runtime;
+pub mod service;

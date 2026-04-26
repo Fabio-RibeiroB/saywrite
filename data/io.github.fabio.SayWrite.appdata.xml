@@ -6,6 +6,7 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
   <developer_name>Fabio</developer_name>
+  <url type="homepage">https://github.com/Fabio-RibeiroB/saywrite</url>
   <description>
     <p>
       SayWrite turns your voice into polished text. Press a shortcut, speak
@@ -18,10 +19,9 @@
       on older hardware.
     </p>
     <p>
-      This release supports GNOME on Wayland. Direct text insertion uses the
-      IBus input method bridge and has been validated on GNOME Wayland setups.
-      On other desktops, SayWrite falls back to clipboard delivery automatically
-      and reports which mode is active so you always know what to expect.
+      Direct text insertion is currently validated on GNOME Wayland. Native
+      builds now bring up direct typing in-process, while clipboard delivery
+      remains available when true typing is not active on the current desktop.
     </p>
   </description>
   <launchable type="desktop-id">io.github.fabio.SayWrite.desktop</launchable>
@@ -38,6 +38,19 @@
   </recommends>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="0.4.0" type="development" date="2026-04-23">
+      <description>
+        <p>Native Debian package migration.</p>
+        <ul>
+          <li>Native Debian-family packaging is now the primary install path</li>
+          <li>Direct Typing is now brought up by the app itself on native builds instead of depending on a separate companion install</li>
+          <li>The old standalone dictation companion target and user service activation files have been removed from the native path</li>
+          <li>Native startup now removes stale user-local companion files left by previous installs so the app can own dictation integration directly</li>
+          <li>Native startup repairs stale local model paths left by previous Flatpak installs when the model already exists in SayWrite's native data directory</li>
+          <li>The validated direct-typing path remains GNOME Wayland</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.3.5" date="2026-04-19">
       <description>
         <p>Hotkey repair and host startup reliability fixes.</p>
