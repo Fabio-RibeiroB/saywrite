@@ -11,7 +11,7 @@ The current phase is **cross-desktop native validation**: prove the packaged app
 - Global hotkey dictation works through the direct-typing controller while SayWrite is running.
 - Local (whisper.cpp) transcription works end to end.
 - Cloud transcription works with OpenAI-compatible APIs.
-- Direct insertion works on the currently validated GNOME Wayland setup via IBus bridge.
+- Direct insertion works on the currently validated GNOME Wayland setup via IBus bridge, including browser textarea, GTK Text Editor, VS Code, terminal/chat input, and repeatability checks.
 - `wtype` (Wayland) and `xdotool` (X11) insertion paths exist but are untested on real hardware.
 - Clipboard and notification fallbacks exist for degraded environments.
 - The app exposes a compatibility D-Bus interface so existing GNOME fallback launchers still work during migration.
@@ -26,6 +26,7 @@ The current phase is **cross-desktop native validation**: prove the packaged app
 - The standalone `saywrite-host` binary target, user systemd service, D-Bus activation file, and host installer script have been removed from the native path.
 - The primary runtime modules now use native integration naming: `native_integration.rs`, `integration_api.rs`, and `desktop_setup.rs`.
 - Native package smoke validation on April 24, 2026 confirmed that `/usr/bin/saywrite` owns `io.github.saywrite.Host`, reports Direct Typing as `typing` via the IBus backend, and treats the GNOME fallback shortcut as an active hotkey path.
+- GNOME Wayland app-matrix validation on April 26, 2026 confirmed Direct Typing in Brave, GNOME Text Editor, VS Code, and terminal/chat input; Qt remains untested on the current machine because no Qt text editor is installed.
 - Startup migration now removes stale user-local `saywrite-host` artifacts left by older Flatpak-era installs: the user systemd service, D-Bus activation file, and `~/.local/bin/saywrite-host`.
 - `docs/support_matrix.md` now contains the native validation runbook for moving X11, KDE/wlroots Wayland, and degraded fallback rows out of `Untested`.
 
@@ -196,13 +197,16 @@ Slices 1-3 plus the v0.5 native naming cleanup on `deb-first` are complete:
 - Flatpak-specific runtime behavior has been removed from the native path
 - the installed package has been validated after removing the old daemon target
 - remaining host-era module names and UI/runtime API names have been simplified around the native in-process controller
+- the current GNOME Wayland row has passed available app-matrix and repeatability checks, with only the Qt app target still pending locally
 
-The next work is native validation outside the current GNOME Wayland machine. Follow `docs/support_matrix.md` and validate in this order:
+The next major work is native validation outside the current GNOME Wayland machine. Follow `docs/support_matrix.md` and validate in this order:
 
 1. X11 with `xdotool`
 2. KDE Plasma Wayland with `wtype` and the XDG GlobalShortcuts portal
 3. wlroots Wayland with `wtype`
 4. an intentionally degraded Wayland session where Clipboard Mode is the clear fallback
+
+The only remaining local GNOME Wayland matrix target is a Qt text editor such as Kate. It should be recorded when available, but it does not block starting X11 validation.
 
 While testing, audit onboarding, Settings, diagnostics, and setup copy so GNOME-specific guidance only appears on GNOME sessions.
 

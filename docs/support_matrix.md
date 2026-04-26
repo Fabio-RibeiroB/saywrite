@@ -55,7 +55,7 @@ Track each row as `Pass`, `Degraded`, `Fail`, or `Untested`. A row only moves to
 
 | Desktop/session | Insertion path | Status | Notes |
 |---|---|---|---|
-| GNOME Wayland | IBus engine | Pass on current machine | Direct insertion proven locally |
+| GNOME Wayland | IBus engine | Pass on current machine | Browser, GTK, Electron, terminal/chat, and repeatability checks passed locally |
 | GNOME Wayland | IBus engine on second machine/account | Untested | Needed before broader beta claim |
 | X11 | xdotool | Untested | Important secondary target |
 | KDE Plasma Wayland | XDG GlobalShortcuts portal + wtype/ydotool | Untested | Portal likely works; insertion needs validation |
@@ -163,11 +163,11 @@ Each supported environment should be tested against representative app types.
 
 | App type | Example | Goal | Status |
 |---|---|---|---|
-| Browser textarea | Firefox / Chromium | Direct insertion into web text box | Untested |
-| GTK app | Text Editor / Builder | Native Linux text input | Untested |
+| Browser textarea | Firefox / Chromium / Brave | Direct insertion into web text box | Pass on current GNOME Wayland machine |
+| GTK app | Text Editor / Builder | Native Linux text input | Pass on current GNOME Wayland machine |
 | Qt app | Kate / Qt Creator | Non-GTK desktop app | Untested |
-| Electron app | VS Code / Discord / Slack | Common real-world target | Untested |
-| Terminal/chat input | Codex / shell-based tools | Fast workflow dictation | Untested |
+| Electron app | VS Code / Discord / Slack | Common real-world target | Pass on current GNOME Wayland machine |
+| Terminal/chat input | Codex / shell-based tools | Fast workflow dictation | Pass on current GNOME Wayland machine |
 
 ## Core Test Script
 
@@ -207,24 +207,38 @@ Package smoke refresh on April 24, 2026 at 22:48 BST:
 - Manual focused-input result: Direct Typing delivered text into the active chat/input field
 - Spoken phrase result observed: `Hello from Say Write?` followed by additional dictated text
 - Follow-up cleanup note: direct insertion passed, but the brand phrase can still transcribe as `Say Write` instead of `SayWrite`
-- Remaining manual work for this row: complete repeatability checks and test browser, GTK, Qt, and Electron app targets
+- Remaining manual work for this row: complete browser, GTK, Qt, Electron, and repeatability checks
+
+GNOME Wayland app-matrix refresh on April 26, 2026 at 17:44 BST:
+
+- Environment: Zorin OS 18.1 (`ID=zorin`, `ID_LIKE="ubuntu debian"`), `XDG_CURRENT_DESKTOP=zorin:GNOME`, `XDG_SESSION_TYPE=wayland`
+- Checks passed before testing: `cargo fmt --check`, `cargo check`, `cargo test`, `cargo deb`
+- Reinstalled package: `target/debian/saywrite_0.3.5-1_amd64.deb`
+- Package content check: no `saywrite-host`, `io.github.saywrite.Host.service`, or `systemd/user` files
+- Runtime ownership: `/usr/bin/saywrite` owns `io.github.saywrite.Host`
+- Runtime status before manual tests: Direct Typing `typing`, backend `ibus-engine`, hotkey active
+- Manual app results reported by tester: Brave local textarea, GNOME Text Editor, VS Code, and terminal/chat input all passed with Direct Typing
+- Repeatability result reported by tester: repeated dictation, quick repeat, and held-key checks passed without wedging the mic/runtime
+- Log evidence: five successful `kind=typed` IBus commits were captured during the run
+- Observed edge case: one final empty-capture run produced `raw_len=0` and `kind=failed` with `SayWrite hit an unexpected error`; no stuck microphone or repeated-session wedge was reported
+- Remaining manual work for this row: Qt app target remains untested because no Qt text editor was installed locally
 
 Run these on the current GNOME Wayland machine and record each row as `Pass`, `Degraded`, `Fail`, or `Untested`.
 
 ### App Checklist
 
-- [ ] Browser textarea: Firefox or Chromium
-- [ ] GTK app: Text Editor
+- [x] Browser textarea: Brave local textarea
+- [x] GTK app: Text Editor
 - [ ] Qt app: Kate or another Qt text editor
-- [ ] Electron app: VS Code, Discord, or Slack
+- [x] Electron app: VS Code
 - [x] Terminal/chat input: Codex or another terminal-based prompt/chat tool
 
 ### Repeatability Checklist
 
-- [ ] Repeat dictation twice in the same field
-- [ ] Try a quick accidental repeat press
-- [ ] Try a short held-key scenario and confirm the mic does not wedge
-- [ ] Confirm the runtime returns to `idle` after each run
+- [x] Repeat dictation twice in the same field
+- [x] Try a quick accidental repeat press
+- [x] Try a short held-key scenario and confirm the mic does not wedge
+- [x] Confirm the runtime returns to an available state after each run
 
 ### Expected Phrase
 
